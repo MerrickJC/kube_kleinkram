@@ -1,4 +1,3 @@
-import { ActionWorkerDto } from '@api-dto/action-workers.dto';
 import { ActionTemplateDto } from '@api-dto/actions/action-template.dto';
 import { AuditLogDto } from '@api-dto/actions/audit-log.dto';
 import { DockerImageDto } from '@api-dto/actions/docker-image.dto';
@@ -90,11 +89,10 @@ export class ActionDto {
     @Type(() => UserDto)
     creator!: UserDto;
 
-    @ApiProperty()
+    @ApiProperty({ required: false })
     @IsOptional()
-    @ValidateNested()
-    @Type(() => ActionWorkerDto)
-    worker!: ActionWorkerDto | null;
+    @IsString()
+    workflowName!: string | null;
 
     @ApiProperty()
     @IsEnum(ActionTriggerSource)
