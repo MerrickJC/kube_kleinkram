@@ -23,7 +23,6 @@ export * from './entities/project/project.entity';
 export * from './entities/tagType/tag-type.entity';
 export * from './entities/topic/topic.entity';
 export * from './entities/user/user.entity';
-export * from './entities/worker/worker.entity';
 export { default as environment } from './environment';
 export * from './modules/access-control/access-control.module';
 export * from './modules/access-control/access-control.service';
@@ -62,7 +61,6 @@ import { ProjectEntity } from './entities/project/project.entity';
 import { TagTypeEntity } from './entities/tagType/tag-type.entity';
 import { TopicEntity } from './entities/topic/topic.entity';
 import { UserEntity } from './entities/user/user.entity';
-import { WorkerEntity } from './entities/worker/worker.entity';
 import { MissionAccessViewEntity } from './viewEntities/mission-access-view.entity';
 import { ProjectAccessViewEntity } from './viewEntities/project-access-view.entity';
 
@@ -87,7 +85,6 @@ export const ALL_ENTITIES = [
     TagTypeEntity,
     TopicEntity,
     UserEntity,
-    WorkerEntity,
     MissionAccessViewEntity,
     ProjectAccessViewEntity,
 ];

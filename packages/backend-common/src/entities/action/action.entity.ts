@@ -4,7 +4,6 @@ import { ApiKeyEntity } from '@backend-common/entities/auth/api-key.entity';
 import { BaseEntity } from '@backend-common/entities/base-entity.entity';
 import { MissionEntity } from '@backend-common/entities/mission/mission.entity';
 import { UserEntity } from '@backend-common/entities/user/user.entity';
-import { WorkerEntity } from '@backend-common/entities/worker/worker.entity';
 import { RuntimeDescription } from '@backend-common/types';
 import {
     ActionErrorHint,
@@ -133,10 +132,9 @@ export class ActionEntity extends BaseEntity {
     @Column({ type: 'json', nullable: true })
     image?: Image;
 
-    @ManyToOne(() => WorkerEntity, (worker) => worker.actions, {
-        nullable: true,
-    })
-    worker?: WorkerEntity;
+    /* Argo Workflow uses (namespace `kleinkram-actions`, name = `action-${uuid}`) */
+    @Column({ nullable: true })
+    workflowName?: string;
 
     @Column({
         type: 'enum',
