@@ -39,7 +39,7 @@ image:
   pullSecrets: []
 
 apiServer:
-  replicaCount: 2
+  replicaCount: 1
   port: 3000
   service:
     port: 3000
@@ -48,13 +48,13 @@ apiServer:
     limits: { cpu: '1', memory: 1Gi }
   autoscaling:
     enabled: true
-    minReplicas: 2
+    minReplicas: 1
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
   probePath: /api/health
 
 frontend:
-  replicaCount: 2
+  replicaCount: 1
   containerPort: 80
   service:
     port: 80
@@ -63,7 +63,7 @@ frontend:
     limits: { cpu: 250m, memory: 256Mi }
   autoscaling:
     enabled: true
-    minReplicas: 2
+    minReplicas: 1
     maxReplicas: 4
     targetCPUUtilizationPercentage: 70
 
@@ -79,14 +79,14 @@ documentation:
 # uses the kleinkram-action-operator ServiceAccount with namespaced RBAC
 # onto Workflow/Pod/Secret objects
 queueConsumer:
-  replicaCount: 2
+  replicaCount: 1
   port: 3000
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits: { cpu: '1', memory: 1Gi }
   autoscaling:
     enabled: true
-    minReplicas: 2
+    minReplicas: 1
     maxReplicas: 8
     targetCPUUtilizationPercentage: 70
   serviceAccountName: kleinkram-action-operator
