@@ -1,0 +1,19 @@
+# A ClusterRole (so it can be reused/versioned once), which is only ever
+# bound to the namespaced kleinkram-action-operator RoleBinding. Provides
+# a least-privilege grant onto exactly the objects the Action Operator needs
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kleinkram-action-operator
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ['argoproj.io']
+    resources: ['workflows']
+    verbs: ['create', 'get', 'list', 'watch', 'delete', 'patch']
+  - apiGroups: ['']
+    resources: ['pods']
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['']
+    resources: ['secrets']
+    verbs: ['create', 'get', 'delete']

@@ -25,6 +25,7 @@ import {
     ACTION_MANAGED_BY_LABEL_KEY,
     ACTION_MANAGED_BY_LABEL_VALUE,
     ACTION_UUID_LABEL,
+    actionPodServiceAccount,
     actionsNamespace,
     apiKeySecretNameForAction,
     ARGO_GROUP,
@@ -272,6 +273,7 @@ export class WorkflowDispatchService {
             },
             spec: {
                 entrypoint: 'run-action',
+                serviceAccountName: actionPodServiceAccount(),
                 activeDeadlineSeconds,
                 podGC: { strategy: 'OnWorkflowCompletion' },
                 ttlStrategy: { secondsAfterCompletion: 86_400 },
