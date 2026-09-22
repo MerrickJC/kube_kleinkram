@@ -1,0 +1,234 @@
+# Kleinkram Helm chart values
+#
+# This chart assumes the following are ALREADY INSTALLED in the target
+# cluster and does NOT configure them:
+#   - Kubernetes (K3s)
+#   - Kueue (controller + CRDs) - this chart creates Kleinkram-specific
+#     ResourceFlavor/ClusterQueue/LocalQueue objects on top of Kueue
+#   - Argo Workflows (workflow-controller + Argo Server) - this chart only
+#     configures the S3 artifact repository it reads from
+#   - Postgres and SeaweedFS, with reasonable configurations
+#
+# Optionally, you can also install a policy engine (Kyverno or Gatekeeper)
+# for the image allow-list under `policy:` below. This is not deployed by
+# this chart
+
+namespaces:
+  app: kleinkram
+  actions: kleinkram-actions
+
+image:
+  registry: docker.io
+  repository: rslethz/kleinkram
+  # Left blank this uses the chart's `appVersion` by default
+  # Set explicitly to one of the following.
+  # Immutable tags are:
+  #   prod  '-{package.json version}'
+  #   dev   '-{version}-dev.{sha}'
+  # If using immutable tags, set 'pullPolicy: IfNotPresent'
+  # Mutable tags are:
+  #   prod  '-latest'
+  #   dev   '-dev'
+  # If using mutable tags, set 'pullPolicy: Always'
+  tag: ''
+  pullPolicy: IfNotPresent
+  # Names of pre-existing Secrets in the `namespaces.app` namespace, for
+  # pulling from a private registry (e.g. if `registry`/`repository` above
+  # point at your images instead of the upstream `docker.io/rslethz/kleinkram`).
+  # Applied to every Deployment/StatefulSet this chart creates
+  pullSecrets: []
+
+apiServer:
+  replicaCount: 2
+  port: 3000
+  service:
+    port: 3000
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: '1', memory: 1Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  probePath: /api/health
+
+frontend:
+  replicaCount: 2
+  containerPort: 80
+  service:
+    port: 80
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 256Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+documentation:
+  replicaCount: 1
+  containerPort: 80
+  service:
+    port: 80
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 128Mi }
+
+# uses the kleinkram-action-operator ServiceAccount with namespaced RBAC
+# onto Workflow/Pod/Secret objects
+queueConsumer:
+  replicaCount: 2
+  port: 3000
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: '1', memory: 1Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  serviceAccountName: kleinkram-action-operator
+  probePath: /health
+  # Defaults below match the fallback values already in the code
+  actionsNamespace: kleinkram-actions
+  kueueLocalQueue: kleinkram-actions
+  argoArtifactRepositoryConfigMap: kleinkram-artifact-repository
+
+# This is the identity the Action containers themselves run as and has NO RBAC bindings. 
+# It mainly carries imagePullSecrets for Action images pulled from a private registry
+actions:
+  serviceAccountName: kleinkram-action-pod
+  # Separate from image.pullSecrets since Action images may be in a
+  # different registry than this app's own images
+  imagePullSecrets: []
+
+# set redis.enabled=false to point at an externally-managed Redis instead
+# (you would then configure redis via config.redisHost/redisPort in the
+# config object below)
+redis:
+  enabled: true
+  image: redis:latest
+  storage: 1Gi
+  storageClassName: local-path
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 256Mi }
+
+config:
+  frontendUrl: 'https://kleinkram.example.com'
+  docsUrl: 'https://docs.kleinkram.example.com'
+  backendUrl: 'https://api.kleinkram.example.com'
+  s3Endpoint: 'http://seaweedfs.default.svc:9000'
+  s3DataBucketName: kleinkram-data
+  s3DbBucketName: kleinkram-dbbackup
+  s3ArtifactsBucketName: action-artifacts
+  dbHost: postgres.default.svc
+  dbPort: 5432
+  dbDatabase: kleinkram
+  redisHost: kleinkram-redis
+  redisPort: 6379
+  dockerHubNamespace: rslethz
+  vitePublicOauthFake: 'false'
+
+# this chart references Secret names in its Deployments, it does not create
+# the Secret objects or manage their contents
+secretNames:
+  # secrets are split to reduce the number of other secrets needed to rotate a secret
+  # and store the updated Secret resource
+  #
+  # DB_USER, DB_PASSWORD
+  db: kleinkram-db-credentials
+  # S3_ACCESS_KEY, S3_SECRET_KEY, S3_USER, S3_PASSWORD
+  s3: kleinkram-s3-credentials
+  # JWT_SECRET
+  jwt: kleinkram-jwt-secret
+  # GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+  googleOauth: kleinkram-google-oauth-credentials
+  # GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+  githubOauth: kleinkram-github-oauth-credentials
+  # Must use the key 'google-service-account.json' containing the service account JSON
+  googleServiceAccount: kleinkram-google-service-account
+
+# Generic networking.k8s.io/v1 Ingress. Disabled by default. If enabled,
+# set `className` to match the ingress controller or leave blank to use the
+# cluster's default IngressClass (if one exists). Enable ingress.tls only
+# if a tls certificate is stored in the named secret
+ingress:
+  enabled: false
+  className: ''
+  annotations: {}
+  frontendHost: kleinkram.example.com
+  apiHost: api.kleinkram.example.com
+  docsHost: docs.kleinkram.example.com
+  tls:
+    enabled: false
+    secretName: kleinkram-tls
+
+kueue:
+  clusterQueueName: kleinkram-cluster-queue
+  localQueueName: kleinkram-actions
+  resourceFlavors:
+    cpu:
+      name: cpu-default
+      # No node selector by default means pods can bind to any node. Adjust as needed
+      nodeSelector: {}
+    gpu:
+      name: gpu-default
+      # Must match the node label applied to the GPU node pool, and the NVIDIA device
+      # plugin DaemonSet must already be running there. Adjust nodeSelector/tolerations
+      # to match
+      nodeSelector:
+        gpu: 'true'
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+  # sample quotas. These numbers are examples only
+  quota:
+    cpu:
+      cpu: '16'
+      memory: 64Gi
+    gpu:
+      nvidiaGpu: '2'
+  # Optional flag to create WorkloadPriorityClasses
+  priorityClasses:
+    enabled: true
+
+argo:
+  artifactRepository:
+    configMapName: kleinkram-artifact-repository
+    # Not created by this chart (see `secretNames` comment above) and must
+    # contain these keys: accessKey, secretKey
+    credentialsSecretName: kleinkram-artifact-repository-credentials
+    key: artifactRepository
+    # Plain HTTP by default since SeaweedFS is typically reached over a
+    # cluster-internal Service without TLS. Set to false if using TLS
+    insecure: true
+
+policy:
+  # Requires Kyverno (or Gatekeeper) to already be installed in the cluster
+  kyverno:
+    enabled: false
+    allowedImageRegistries:
+      - 'docker.io/rslethz/action/*'
+      - 'ghcr.io/leggedrobotics/*'
+
+# Restricts kleinkram-action egress. Configs modify DNS namespace and whitelist 
+# CIDR for seaweedfs
+networkPolicy:
+  enabled: true
+  # NetworkPolicy can't match by hostname. This assumes SeaweedFS is reachable
+  # via a cluster-internal Service/CIDR range but if SeaweedFS is external to
+  # the cluster, replace this with the correct egress CIDR. This placeholder
+  # is an example only
+  seaweedfsCidr: 10.0.0.0/8
+  dnsNamespace: kube-system
+
+# Observability stack is NOT deployed by this chart (see DESIGN.md in this
+# directory). Point the values below at the existing deployments
+observability:
+  # Leave blank to disable (falls back to running without metrics)
+  prometheusUrl: 'http://prometheus.observability.svc:9090'
+
