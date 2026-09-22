@@ -16,6 +16,9 @@ jobs:
               with:
                   username: ${{ secrets.DOCKERHUB_USERNAME }}
                   password: ${{ secrets.DOCKERHUB_TOKEN }}
+            - name: Read app version
+              id: version
+              run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
             - working-directory: .
               name: Build the Docker compose
               run: docker compose -f docker-compose.dev.yml build
@@ -24,6 +27,15 @@ jobs:
                   GIT_BRANCH: ${{ github.ref_name }}
                   GIT_COMMIT: ${{ github.sha }}
                   S3_ENDPOINT: ${{ vars.S3_ENDPOINT_DEV }}
+            - name: Tag images with traceable dev version
+              run: |
+                  for service in api-server frontend queue-consumer documentation; do
+                    docker tag "rslethz/kleinkram:${service}-dev" "rslethz/kleinkram:${service}-${{ steps.version.outputs.version }}-dev.${{ github.sha }}"
+                  done
             - working-directory: .
-              name: push the docker image
-              run: docker compose -f docker-compose.dev.yml push api-server frontend queue-consumer documentation artifact-uploader
+              name: push the docker images
+              run: |
+                  docker compose -f docker-compose.dev.yml push api-server frontend queue-consumer documentation
+                  for service in api-server frontend queue-consumer documentation; do
+                    docker push "rslethz/kleinkram:${service}-${{ steps.version.outputs.version }}-dev.${{ github.sha }}"
+                  done
