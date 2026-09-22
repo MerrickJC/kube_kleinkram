@@ -53,8 +53,9 @@ export class ActionDispatcherService implements OnModuleInit, OnModuleDestroy {
         templateUuid: string,
         mission: MissionEntity,
         creator: UserEntity,
+        // Kept for downstream compatibility (trigger/webhook payload data)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        parameters: Record<string, any>,
+        _parameters: Record<string, any>,
         triggerSource: ActionTriggerSource = ActionTriggerSource.MANUAL,
         triggerUuid?: string,
     ): Promise<string> {
@@ -121,8 +122,8 @@ export class ActionDispatcherService implements OnModuleInit, OnModuleDestroy {
     }
 
     /**
-     * Stops a running (or still-queued) action.
-     * Queued jobs: removes the submit job
+     * Stops a running or still-queued action
+     * Queued jobs: removes the submit job from the queue
      * Running jobs: asks Action Operator to terminate the run
      */
     async stopAction(actionRunId: string): Promise<void> {

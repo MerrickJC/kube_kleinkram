@@ -46,8 +46,6 @@ export class WorkflowCancellationService {
                 plural: WORKFLOW_PLURAL,
                 name: workflowName,
                 body: { spec: { shutdown: 'Terminate' } },
-                // eslint-disable-next-line @typescript-eslint/naming-convention
-                headers: { 'Content-Type': 'application/merge-patch+json' },
             });
             logger.info(`Requested termination of Workflow ${workflowName}`);
         } catch (error) {
