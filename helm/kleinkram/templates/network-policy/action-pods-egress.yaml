@@ -1,0 +1,42 @@
+{{- if .Values.networkPolicy.enabled }}
+# Default-deny egress from Action pods except DNS, the api-server Service,
+# and the SeaweedFS S3 endpoint
+#
+# LIMITATION: standard NetworkPolicy can't match by external hostname, only
+# label/namespace selectors or CIDRs. `networkPolicy.seaweedfsCidr` assumes
+# SeaweedFS is reachable via a cluster-internal Service/CIDR range. If
+# SeaweedFS is external to the cluster, it will not be reachable as it is 
+# currently configured, so it will need to be adjusted
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kleinkram-action-egress
+  namespace: {{ .Values.namespaces.actions }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ['Egress']
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace }}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.app }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: api-server
+      ports:
+        - { protocol: TCP, port: {{ .Values.apiServer.port }} }
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.seaweedfsCidr }}
+      ports:
+        - { protocol: TCP, port: 9000 }
+{{- end }}
