@@ -29,13 +29,13 @@ jobs:
                   S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
             - name: Tag images with immutable app version
               run: |
-                  for service in api-server frontend queue-consumer documentation; do
+                  for service in api-server frontend queue-consumer docs; do
                     docker tag "rslethz/kleinkram:${service}-latest" "rslethz/kleinkram:${service}-${{ steps.version.outputs.version }}"
                   done
             - working-directory: .
               name: push the docker images
               run: |
                   docker compose -f docker-compose.prod.yml push api-server frontend queue-consumer documentation
-                  for service in api-server frontend queue-consumer documentation; do
+                  for service in api-server frontend queue-consumer docs; do
                     docker push "rslethz/kleinkram:${service}-${{ steps.version.outputs.version }}"
                   done

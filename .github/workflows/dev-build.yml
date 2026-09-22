@@ -29,13 +29,13 @@ jobs:
                   S3_ENDPOINT: ${{ vars.S3_ENDPOINT_DEV }}
             - name: Tag images with traceable dev version
               run: |
-                  for service in api-server frontend queue-consumer documentation; do
+                  for service in api-server frontend queue-consumer docs; do
                     docker tag "rslethz/kleinkram:${service}-dev" "rslethz/kleinkram:${service}-${{ steps.version.outputs.version }}-dev.${{ github.sha }}"
                   done
             - working-directory: .
               name: push the docker images
               run: |
                   docker compose -f docker-compose.dev.yml push api-server frontend queue-consumer documentation
-                  for service in api-server frontend queue-consumer documentation; do
+                  for service in api-server frontend queue-consumer docs; do
                     docker push "rslethz/kleinkram:${service}-${{ steps.version.outputs.version }}-dev.${{ github.sha }}"
                   done
