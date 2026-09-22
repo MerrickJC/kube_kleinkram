@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleinkram-queue-consumer
+  namespace: {{ .Values.namespaces.app }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+    app.kubernetes.io/component: queue-consumer
+spec:
+  replicas: {{ .Values.queueConsumer.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kleinkram.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: queue-consumer
+  template:
+    metadata:
+      labels:
+        {{- include "kleinkram.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: queue-consumer
+    spec:
+      serviceAccountName: {{ .Values.queueConsumer.serviceAccountName }}
+      {{- if .Values.image.pullSecrets -}}
+      {{- include "kleinkram.imagePullSecrets" .Values.image.pullSecrets | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: queue-consumer
+          image: {{ include "kleinkram.image" (dict "root" $ "service" "queue-consumer") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.queueConsumer.port }}
+          envFrom:
+            - configMapRef: { name: kleinkram-config }
+            - secretRef: { name: {{ .Values.secretNames.db }} }
+            - secretRef: { name: {{ .Values.secretNames.s3 }} }
+            - secretRef: { name: {{ .Values.secretNames.jwt }} }
+            - secretRef: { name: {{ .Values.secretNames.googleOauth }} }
+            - secretRef: { name: {{ .Values.secretNames.githubOauth }} }
+          volumeMounts:
+            - name: google-service-account
+              mountPath: /app/secrets
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: {{ .Values.queueConsumer.probePath }}, port: {{ .Values.queueConsumer.port }} }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: {{ .Values.queueConsumer.probePath }}, port: {{ .Values.queueConsumer.port }} }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.queueConsumer.resources | nindent 12 }}
+      volumes:
+        - name: google-service-account
+          secret:
+            secretName: {{ .Values.secretNames.googleServiceAccount }}
