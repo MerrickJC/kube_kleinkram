@@ -185,10 +185,6 @@ export default {
         return asString('GOOGLE_KEY_FILE');
     },
 
-    get ARTIFACTS_UPLOADER_IMAGE(): string {
-        return asString('ARTIFACTS_UPLOADER_IMAGE');
-    },
-
     get S3_ARTIFACTS_BUCKET_NAME(): string {
         return asString('S3_ARTIFACTS_BUCKET_NAME');
     },
