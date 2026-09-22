@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleinkram-documentation
+  namespace: {{ .Values.namespaces.app }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+    app.kubernetes.io/component: documentation
+spec:
+  replicas: {{ .Values.documentation.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kleinkram.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: documentation
+  template:
+    metadata:
+      labels:
+        {{- include "kleinkram.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: documentation
+    spec:
+      {{- if .Values.image.pullSecrets -}}
+      {{- include "kleinkram.imagePullSecrets" .Values.image.pullSecrets | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: documentation
+          image: {{ include "kleinkram.image" (dict "root" $ "service" "docs") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.documentation.containerPort }}
+          readinessProbe:
+            httpGet: { path: /, port: {{ .Values.documentation.containerPort }} }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: {{ .Values.documentation.containerPort }} }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.documentation.resources | nindent 12 }}
