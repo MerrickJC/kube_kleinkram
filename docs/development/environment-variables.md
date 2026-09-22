@@ -44,7 +44,6 @@ Configuration for the PostgreSQL database.
 | `DB_DATABASE`      | The name of the database.                                             | `dbname`                                                              |
 | `DB_USER`          | The database username.                                                | `dbuser`                                                              |
 | `DB_PASSWORD`      | The database password.                                                | `dbuserpass`                                                          |
-| `DATA_SOURCE_NAME` | The full connection string/DSN for TypeORM/Postgres.                  | `postgresql://dbuser:dbuserpass@database:5432/dbname?sslmode=disable` |
 | `DEV`              | Set to `true` to enable development features (verbose logging, etc.). | `true`                                                                |
 
 ## TypeORM Configuration
@@ -75,8 +74,4 @@ Configuration for the PostgreSQL database.
 
 | Variable                    | Description                                              | Default                                      |
 | :-------------------------- | :------------------------------------------------------- | :------------------------------------------- |
-| `DOCKER_HUB_USERNAME`       | Username for Docker Hub authentication.                  | -                                            |
-| `DOCKER_HUB_PASSWORD`       | Password for Docker Hub authentication.                  | -                                            |
 | `VITE_DOCKER_HUB_NAMESPACE` | Restricts allowed Docker images to a specific namespace. | -                                            |
-| `ARTIFACTS_UPLOADER_IMAGE`  | Docker image used for uploading artifacts.               | `rslethz/kleinkram:artifact-uploader-latest` |
-| `DOCKER_GID`                | The group ID of the docker group on the host system.     | `984`                                        |
