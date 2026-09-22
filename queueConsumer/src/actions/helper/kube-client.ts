@@ -27,6 +27,12 @@ export function actionsNamespace(): string {
     return process.env.KUBE_NAMESPACE_ACTIONS ?? 'kleinkram-actions';
 }
 
+// The identity that Action containers run as which carries imagePullSecrets
+// for private-registry Action images
+export function actionPodServiceAccount(): string {
+    return process.env.ACTION_POD_SERVICE_ACCOUNT ?? 'kleinkram-action-pod';
+}
+
 export function workflowNameForAction(actionUuid: string): string {
     return `action-${actionUuid}`;
 }
