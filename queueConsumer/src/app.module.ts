@@ -5,7 +5,6 @@ import {
     StorageModule,
 } from '@kleinkram/backend-common';
 import { redis } from '@kleinkram/backend-common/consts';
-import { ActionRunnerEntity } from '@kleinkram/backend-common/entities/action/action-runner.entity';
 import { ActionTemplateEntity } from '@kleinkram/backend-common/entities/action/action-template.entity';
 import { ActionTriggerEntity } from '@kleinkram/backend-common/entities/action/action-trigger.entity';
 import { ActionEntity } from '@kleinkram/backend-common/entities/action/action.entity';
@@ -23,7 +22,6 @@ import { ProjectEntity } from '@kleinkram/backend-common/entities/project/projec
 import { TagTypeEntity } from '@kleinkram/backend-common/entities/tagType/tag-type.entity';
 import { TopicEntity } from '@kleinkram/backend-common/entities/topic/topic.entity';
 import { UserEntity } from '@kleinkram/backend-common/entities/user/user.entity';
-import { WorkerEntity } from '@kleinkram/backend-common/entities/worker/worker.entity';
 import env from '@kleinkram/backend-common/environment';
 import configuration from '@kleinkram/backend-common/typeorm-config';
 import { MissionAccessViewEntity } from '@kleinkram/backend-common/viewEntities/mission-access-view.entity';
@@ -38,6 +36,7 @@ import { AccessGroupExpiryProvider } from './accessGroupExpiry/access-group-expi
 import { ActionsModule } from './actions/actions.module';
 import { FileProcessorModule } from './file-processor/file-processor.module';
 import { FileCleanupQueueProcessorProvider } from './fileCleanup/file-cleanup-queue-processor.provider';
+import { HealthModule } from './health/health.module';
 import { TriggerProcessorModule } from './trigger-processor/trigger-processor.module';
 
 @Module({
@@ -85,7 +84,6 @@ import { TriggerProcessorModule } from './trigger-processor/trigger-processor.mo
                     ProjectEntity,
                     TopicEntity,
                     ActionEntity,
-                    ActionRunnerEntity,
                     ActionTemplateEntity,
                     ActionTriggerEntity,
                     UserEntity,
@@ -98,7 +96,6 @@ import { TriggerProcessorModule } from './trigger-processor/trigger-processor.mo
                     MissionAccessEntity,
                     ProjectAccessViewEntity,
                     MissionAccessViewEntity,
-                    WorkerEntity,
                     CategoryEntity,
                     GroupMembershipEntity,
                 ],
@@ -119,6 +116,7 @@ import { TriggerProcessorModule } from './trigger-processor/trigger-processor.mo
         ScheduleModule.forRoot(),
         StorageModule,
         AccessControlModule,
+        HealthModule,
     ],
     providers: [FileCleanupQueueProcessorProvider, AccessGroupExpiryProvider],
 })

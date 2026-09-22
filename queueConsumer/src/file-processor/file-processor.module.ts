@@ -16,7 +16,6 @@ import { FileEventEntity } from '@kleinkram/backend-common/entities/file/file-ev
 import { FileEntity } from '@kleinkram/backend-common/entities/file/file.entity';
 import { IngestionJobEntity } from '@kleinkram/backend-common/entities/file/ingestion-job.entity';
 import { TopicEntity } from '@kleinkram/backend-common/entities/topic/topic.entity';
-import { WorkerEntity } from '@kleinkram/backend-common/entities/worker/worker.entity';
 import { StorageModule } from '@kleinkram/backend-common/modules/storage/storage.module';
 import { FileQueueProcessorProvider } from './file-queue-processor.provider';
 import { FileRepairProcessor } from './file-repair.consumer';
@@ -39,7 +38,6 @@ import { Db3Handler } from './handlers/db3.handler';
             ActionEntity,
             ActionTemplateEntity,
             FileEventEntity,
-            WorkerEntity,
             ApiKeyEntity,
         ]),
         BullModule.registerQueue({ name: 'file-queue' }),
