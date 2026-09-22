@@ -20,12 +20,8 @@ type WorkflowStatus = Record<string, any> & {
 };
 
 /**
- * Replaces the old `ARTIFACT_METADATA:`-stdout-parsing convention
- * (`docker-daemon.service.ts`'s `launchArtifactUploadContainer`) -- Argo's
- * injected `wait` sidecar already staged `/out` to the S3 artifact
- * repository declared on the Workflow (see WorkflowDispatchService), so the
- * size/key is already known to Argo and just needs reading back off the
- * completed Workflow's status.
+ * Argo Workflow's injected `wait` sidecar already staged `/out` to the S3 artifact
+ * repository, so just need to read the size/key from the completed Workflow's status
  */
 @Injectable()
 export class ArtifactStatusService {
