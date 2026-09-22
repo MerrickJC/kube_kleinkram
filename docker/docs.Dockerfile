@@ -54,7 +54,6 @@ RUN SERVER_PORT=3000 \
     BACKEND_URL=http://localhost:3000 \
     DOCS_URL=http://localhost:4000 \
     GOOGLE_KEY_FILE=test.json \
-    ARTIFACTS_UPLOADER_IMAGE=test \
     VITE_USE_FAKE_OAUTH_FOR_DEVELOPMENT=true \
     node -r ts-node/register -r tsconfig-paths/register ./scripts/generate-openapi.ts
 
