@@ -1,9 +1,0 @@
-import type { ActionWorkersDto } from '@kleinkram/api-dto/types/action-workers.dto';
-import { AxiosResponse } from 'axios';
-import axios from 'src/api/axios';
-
-export async function allWorkers(): Promise<ActionWorkersDto> {
-    const response: AxiosResponse<ActionWorkersDto> =
-        await axios.get('/workers');
-    return response.data;
-}

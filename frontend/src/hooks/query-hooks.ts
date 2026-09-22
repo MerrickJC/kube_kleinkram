@@ -4,7 +4,6 @@ import type { AccessGroupDto } from '@kleinkram/api-dto/types/access-control/acc
 import type { AccessGroupsDto } from '@kleinkram/api-dto/types/access-control/access-groups.dto';
 import type { DefaultRights } from '@kleinkram/api-dto/types/access-control/default-rights';
 import type { ProjectAccessListDto } from '@kleinkram/api-dto/types/access-control/project-access.dto';
-import type { ActionWorkersDto } from '@kleinkram/api-dto/types/action-workers.dto';
 import type { CategoriesDto } from '@kleinkram/api-dto/types/category.dto';
 import type { FileEventsDto } from '@kleinkram/api-dto/types/file/file-event.dto';
 import type { FileWithTopicDto } from '@kleinkram/api-dto/types/file/file.dto';
@@ -68,7 +67,6 @@ import {
     resolveUsers,
     searchUsers,
 } from 'src/services/queries/user';
-import { allWorkers } from 'src/services/queries/worker';
 import { QueryURLHandler } from 'src/services/query-handler';
 import { computed, ComputedRef, ref, Ref, unref, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -465,17 +463,6 @@ export const useMissionsOfProjectMinimal = (
         queryKey: ['missions', projectUuid],
         queryFn: () =>
             missionsOfProjectMinimal(unref(projectUuid) ?? '', take, skip),
-    });
-};
-
-export const useWorkers = (): UseQueryReturnType<
-    ActionWorkersDto | undefined,
-    Error
-> => {
-    return useQuery<ActionWorkersDto>({
-        queryKey: ['worker'],
-        queryFn: () => allWorkers(),
-        refetchInterval: 10_000,
     });
 };
 
