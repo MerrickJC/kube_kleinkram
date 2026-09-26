@@ -31,11 +31,11 @@ This chart only deploys Kleinkram's own application resources and the namespace-
 - A separate `ServiceAccount` that Action containers run as
 - A `NetworkPolicy` restricting Action pod egress, and an optional Kyverno `ClusterPolicy` restricting which image registries Action images can be pulled from
 
-See the chart's [values.yaml](../../helm/kleinkram/values.yaml) for the full set of configurable values, some of which are required to work correctly and will not work with default values.
+The chart's values.yaml contains the full set of configurable values, some of which are required to work correctly and will not work with default values.
 
 ## Secrets
 
-This chart does not create `Secret` objects or holds secret material for configuring connections to prerequisite services, it only references Secret names in its Deployments. [values.yaml](../../helm/kleinkram/values.yaml) defines a `secretNames` field with six references to Secret names as well as `argo.artifactRepository.credentialsSecretName`. You need to create each of the Secrets yourself using the keys documented next to each value in `values.yaml`. It would be advisable to use some sort of Secret management tool such as [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets), [External Secrets Operator](https://external-secrets.io/), or [SOPS](https://getsops.io/).
+This chart does not create `Secret` objects or holds secret material for configuring connections to prerequisite services, it only references Secret names in its Deployments. The chart's values.yaml defines a `secretNames` field with references to Secret names as well as `argo.artifactRepository.credentialsSecretName`. You need to create each of the Secrets yourself using the keys documented next to each value in `values.yaml`. It would be advisable to use some sort of Secret management tool such as [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets), [External Secrets Operator](https://external-secrets.io/), or [SOPS](https://getsops.io/).
 
 ## Observability
 
