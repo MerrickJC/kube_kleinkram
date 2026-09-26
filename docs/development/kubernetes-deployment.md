@@ -7,7 +7,7 @@ Kleinkram can be deployed to a Kubernetes cluster via the Helm chart at [`helm/k
 
 ## Prerequisites
 
-This chart only deploys Kleinkram's own application resources and the namespace-scoped objects that bind it to cluster infrastructure. The following are assumed to already be installed and configured (see [`helm/kleinkram/DESIGN.md`](../../helm/kleinkram/DESIGN.md) for the justification):
+This chart only deploys Kleinkram's own application resources and the namespace-scoped objects that bind it to cluster infrastructure. There are a number of applications which are assumed to have be installed and configured outside of the helm chart. This is mainly because they represent large applications with application lifecycles independent of just this chart. The following are assumed to already be installed and configured:
 
 - A Kubernetes cluster (development was done against K3s with Traefik as the ingress controller)
 - [Kueue](https://kueue.sigs.k8s.io/) (controller + CRDs). The chart creates Kleinkram-specific `ResourceFlavor`/`ClusterQueue`/`LocalQueue` objects, but doesn't deploy Kueue itself
@@ -39,4 +39,4 @@ This chart does not create `Secret` objects or holds secret material for configu
 
 ## Observability
 
-Prometheus, Loki, and Tempo are not deployed by this chart. See [helm/kleinkram/DESIGN.md](../../helm/kleinkram/DESIGN.md) for justification. If Prometheus is reachable, point `values.yaml`'s `observability.prometheusUrl` at it to enable Action resource-usage metrics. For log querying, the log-shipping agent (e.g. Promtail) you are running in the cluster must relabel Pod labels (`action_run_uuid`, `action_template_uuid`, `mission_uuid`, `action_trigger_uuid`, which are already set on each Action Workflow's Pod) into identically-named Loki stream labels, since `ActionService.getLogs` queries Loki directly with those label names.
+Prometheus, Loki, and Tempo are not deployed by this chart since their lifecycle is considered independent of this application. If Prometheus is reachable, point `values.yaml`'s `observability.prometheusUrl` at it to enable Action resource-usage metrics. For log querying, the log-shipping agent (e.g. Promtail) you are running in the cluster must relabel Pod labels (`action_run_uuid`, `action_template_uuid`, `mission_uuid`, `action_trigger_uuid`, which are already set on each Action Workflow's Pod) into identically-named Loki stream labels, since `ActionService.getLogs` queries Loki directly with those label names.
