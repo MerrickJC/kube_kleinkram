@@ -4,11 +4,11 @@ Kleinkram comes with a set of example actions that cover common use cases:
 
 | Action                | Image Name                               | Description                                                | Input           | Output             |
 | :-------------------- | :--------------------------------------- | :--------------------------------------------------------- | :-------------- | :----------------- |
-| **Validate Data**     | `rslethz/action:validate-data-latest`    | Calculates SHA256 checksums of all files in a mission.     | Any             | `.txt` (checksums) |
-| **Convert Formats**   | `rslethz/action:convert-formats-latest`  | Converts MCAP files to CSV.                                | `.mcap`         | `.csv`             |
-| **Extract Metadata**  | `rslethz/action:extract-metadata-latest` | Extracts metadata from bag files (topics, duration, etc.). | `.bag`, `.mcap` | Metadata tags      |
-| **Python Script**     | `rslethz/action:python-template-latest`  | Run a custom Python script on your data.                   | Any             | Any                |
-| **GPU Python Script** | `rslethz/action:gpu-example-latest`      | Run a custom Python script with GPU acceleration.          | Any             | Any                |
+| **Validate Data**     | `registry.merrickcampbell.au/action:validate-data-latest`    | Calculates SHA256 checksums of all files in a mission.     | Any             | `.txt` (checksums) |
+| **Convert Formats**   | `registry.merrickcampbell.au/action:convert-formats-latest`  | Converts MCAP files to CSV.                                | `.mcap`         | `.csv`             |
+| **Extract Metadata**  | `registry.merrickcampbell.au/action:extract-metadata-latest` | Extracts metadata from bag files (topics, duration, etc.). | `.bag`, `.mcap` | Metadata tags      |
+| **Python Script**     | `registry.merrickcampbell.au/action:python-template-latest`  | Run a custom Python script on your data.                   | Any             | Any                |
+| **GPU Python Script** | `registry.merrickcampbell.au/action:gpu-example-latest`      | Run a custom Python script with GPU acceleration.          | Any             | Any                |
 
 ::: tip Source Code for Example Actions
 The source code of these example actions is available in the

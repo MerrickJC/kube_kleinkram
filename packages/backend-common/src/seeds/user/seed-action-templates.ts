@@ -48,7 +48,7 @@ export const seedActionTemplates = async (
                 description: templateDefinition.description,
 
                 // eslint-disable-next-line @typescript-eslint/naming-convention
-                image_name: `rslethz/action:${templateDefinition.name}-${tag}`,
+                image_name: `registry.merrickcampbell.au/action:${templateDefinition.name}-${tag}`,
                 version: 1,
                 creator: adminUser,
                 cpuCores: 1,

@@ -8,7 +8,7 @@ services:
             dockerfile: docker/base.Dockerfile
 
     api-server:
-        image: rslethz/kleinkram:api-server-dev
+        image: registry.merrickcampbell.au/kleinkram:api-server-dev
         container_name: kleinkram-api-server-dev
 
         build:
@@ -83,7 +83,7 @@ services:
             - privatenet
 
     frontend:
-        image: rslethz/kleinkram:frontend-dev
+        image: registry.merrickcampbell.au/kleinkram:frontend-dev
         container_name: kleinkram-frontend-dev
 
         build:
@@ -115,7 +115,7 @@ services:
             - privatenet
 
     queue-consumer:
-        image: rslethz/kleinkram:queue-consumer-dev
+        image: registry.merrickcampbell.au/kleinkram:queue-consumer-dev
         container_name: kleinkram-queue-consumer-dev
         build:
             context: .
@@ -192,7 +192,7 @@ services:
     documentation:
         depends_on:
             - api-server
-        image: rslethz/kleinkram:docs-dev
+        image: registry.merrickcampbell.au/kleinkram:docs-dev
         container_name: kleinkram-documentation-dev
         volumes:
             - swagger-spec:/app/src/docs/
