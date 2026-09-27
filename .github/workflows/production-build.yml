@@ -25,6 +25,7 @@ jobs:
                   GIT_BRANCH: ${{ github.ref_name }}
                   GIT_COMMIT: ${{ github.sha }}
                   S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+                  BUILDX_NO_DEFAULT_ATTESTATIONS: 1
             - name: Tag images with immutable app version
               run: |
                   for service in api-server frontend queue-consumer docs; do

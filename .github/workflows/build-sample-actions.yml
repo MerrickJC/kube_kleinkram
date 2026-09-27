@@ -65,5 +65,7 @@ jobs:
                   context: examples/kleinkram-actions/${{ matrix.action }}
                   push: true
                   tags: registry.merrickcampbell.au/action:${{ matrix.action }}-${{ steps.tag.outputs.tag }}
+                  provenance: false
+                  sbom: false
                   build-args: |
                       KLEINKRAM_VERSION=${{ steps.tag.outputs.kleinkram_version }}
