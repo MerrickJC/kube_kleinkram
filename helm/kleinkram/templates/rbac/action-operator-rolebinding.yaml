@@ -1,0 +1,18 @@
+# This scopes the reusable kleinkram-action-operator ClusterRole's permissions to
+# just the kleinkram-actions namespace, for the ServiceAccount that lives in
+# the kleinkram (app) namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kleinkram-action-operator
+  namespace: {{ .Values.namespaces.actions }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.queueConsumer.serviceAccountName }}
+    namespace: {{ .Values.namespaces.app }}
+roleRef:
+  kind: ClusterRole
+  name: kleinkram-action-operator
+  apiGroup: rbac.authorization.k8s.io

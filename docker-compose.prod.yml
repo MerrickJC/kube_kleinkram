@@ -1,4 +1,8 @@
 # this file described a reference production setup of Kleinkram
+
+# Note: Actions execution now requires Kubernetes/Argo Workflows/Kueue
+# This Compose stack covers the file/metadata pipeline and API/frontend
+# only, not Action runs.
 services:
     base:
         image: kleinkram-base
@@ -7,7 +11,7 @@ services:
             dockerfile: docker/base.Dockerfile
 
     api-server:
-        image: rslethz/kleinkram:api-server-latest
+        image: registry.merrickcampbell.au/kleinkram:api-server-latest
         container_name: kleinkram-api-server-prod
 
         build:
@@ -31,7 +35,6 @@ services:
             DEVBUILD: 'false'
             REDIS_HOST: redis
             DB_HOST: postgres
-            DATA_SOURCE_NAME: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_DATABASE}?sslmode=disable
 
         depends_on:
             - postgres
@@ -82,7 +85,7 @@ services:
             - privatenet
 
     frontend:
-        image: rslethz/kleinkram:frontend-latest
+        image: registry.merrickcampbell.au/kleinkram:frontend-latest
         container_name: kleinkram-frontend-prod
 
         build:
@@ -112,7 +115,7 @@ services:
             - privatenet
 
     queue-consumer:
-        image: rslethz/kleinkram:queue-consumer-latest
+        image: registry.merrickcampbell.au/kleinkram:queue-consumer-latest
         container_name: kleinkram-queue-consumer-prod
         build:
             context: .
@@ -120,14 +123,12 @@ services:
             target: production
             additional_contexts:
                 kleinkram-base: service:base
-                artifact-uploader: service:artifact-uploader
         ports:
-            - '127.0.0.1:8080:8080'
+            - '127.0.0.1:8080:3000'
         env_file:
             - .env
         environment:
             DB_HOST: postgres
-            DATA_SOURCE_NAME: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_DATABASE}?sslmode=disable
             REDIS_HOST: redis
             REDIS_PORT: 6379
         networks:
@@ -136,12 +137,7 @@ services:
             - postgres
             - loki
         volumes:
-            # mount docker socket to access docker from within the container
-            - /var/run/docker.sock:/var/run/docker.sock
             - ./google-service-account.json:/app/queueConsumer/google-service-account.json:ro
-        # Add docker group to allow access to docker socket
-        group_add:
-            - ${DOCKER_GID:-999}
 
     prometheus:
         image: prom/prometheus
@@ -203,7 +199,7 @@ services:
             - privatenet
 
     documentation:
-        image: rslethz/kleinkram:docs-latest
+        image: registry.merrickcampbell.au/kleinkram:docs-latest
         container_name: kleinkram-documentation-prod
         build:
             context: .
@@ -211,12 +207,6 @@ services:
             target: production
         ports:
             - '4000:80'
-
-    artifact-uploader:
-        image: rslethz/kleinkram:artifact-uploader-latest
-        build:
-            context: queueConsumer/src/artifactUpload
-            dockerfile: Dockerfile
 
 volumes:
     postgres_db_data:

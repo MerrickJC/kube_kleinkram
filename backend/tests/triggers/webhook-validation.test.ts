@@ -1,5 +1,5 @@
 import { appVersion } from '@/app-version';
-import { UserEntity, WorkerEntity } from '@kleinkram/backend-common';
+import { UserEntity } from '@kleinkram/backend-common';
 import { systemUser } from '@kleinkram/backend-common/consts';
 import { AccessGroupRights, TriggerType } from '@kleinkram/shared';
 import { DEFAULT_URL, generateAndFetchDatabaseUser } from '../auth/utilities';
@@ -21,22 +21,6 @@ describe('Webhook Validation Tests', () => {
     let projectUuid: string;
 
     beforeEach(async () => {
-        // Seed a stable worker for the dispatcher
-        const workerRepo = database.getRepository(WorkerEntity);
-        const identifier = 'test-worker-webhook-validation';
-        const workerData = {
-            identifier,
-            hostname: 'test-host',
-            reachable: true,
-            lastSeen: new Date(),
-            cpuCores: 8,
-            cpuMemory: 16,
-            gpuMemory: 0,
-            cpuModel: 'Test CPU',
-            storage: 1000,
-        };
-        await workerRepo.save(workerRepo.create(workerData));
-
         const setup = await generateAndFetchDatabaseUser('internal', 'admin');
         user = setup.user;
 

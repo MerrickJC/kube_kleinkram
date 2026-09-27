@@ -1,5 +1,6 @@
 # This file describes the local dev environment for Kleinkram
 # It is intended to be run using docker compose up --build --watch
+# Note: Actions execution now requires Kubernetes/Argo Workflows/Kueue
 services:
     base:
         image: kleinkram-base
@@ -268,14 +269,11 @@ services:
                 GROUP_ID: ${GROUP_ID:-1000}
             additional_contexts:
                 kleinkram-base: service:base
-                artifact-uploader: service:artifact-uploader
 
         volumes:
             - ./queueConsumer:/app/queueConsumer
             - queue_consumer_node_modules:/app/queueConsumer/node_modules
             - ./packages:/app/packages
-            # mount docker socket to access docker from within the container
-            - /var/run/docker.sock:/var/run/docker.sock
             - ./google-service-account.json:/app/queueConsumer/google-service-account.json:ro
             # Mask host node_modules with anonymous volumes to avoid broken symlinks
             - /app/packages/api-dto/node_modules
@@ -283,9 +281,6 @@ services:
             - /app/packages/shared/node_modules
             - /app/packages/validation/node_modules
 
-        # Add docker group to allow access to docker socket
-        group_add:
-            - ${DOCKER_GID:-999}
 
         develop:
             watch:
@@ -439,15 +434,6 @@ services:
             - ./packages:/app/packages
 
         command: npm run docs:dev /app/docs
-
-    artifact-uploader:
-        container_name: kleinkram-artifact-uploader
-        image: rslethz/kleinkram:artifact-uploader-latest
-        build:
-            context: queueConsumer/src/artifactUpload
-            dockerfile: Dockerfile
-        environment:
-            KLEINKRAM_ACTION_UUID: 'dev-action-uuid'
 
     postgres-exporter:
         image: prometheuscommunity/postgres-exporter

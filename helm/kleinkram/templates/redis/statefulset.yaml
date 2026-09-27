@@ -1,0 +1,45 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kleinkram-redis
+  namespace: {{ .Values.namespaces.app }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  serviceName: kleinkram-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kleinkram.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "kleinkram.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      {{- if .Values.image.pullSecrets -}}
+      {{- include "kleinkram.imagePullSecrets" .Values.image.pullSecrets | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']    # TODO: make it 'ReadWriteOncePod' instead
+        storageClassName: {{ .Values.redis.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.redis.storage }}
+{{- end }}

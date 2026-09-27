@@ -13,6 +13,8 @@ Kleinkram is a self-hosted, open-source platform for managing and processing rob
 
 For full documentation, please visit [docs.datasets.leggedrobotics.com](https://docs.datasets.leggedrobotics.com/).
 
+For production-scale deployment on Kubernetes, see the Helm chart at [helm/kleinkram](helm/kleinkram) and the design justification at [helm/kleinkram/DESIGN.md](helm/kleinkram/DESIGN.md) which explains what the chart does and does not own.
+
 ## Try Kleinkram Locally
 
 You can easily run a local instance of Kleinkram to try it out. This has been tested on Ubuntu 24.04 and macOS.

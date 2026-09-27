@@ -10,7 +10,6 @@ import {
     MissionEntity,
     ProjectEntity,
     UserEntity,
-    WorkerEntity,
 } from '@kleinkram/backend-common';
 import { AccessGroupRights, KeyTypes } from '@kleinkram/shared';
 import { DEFAULT_URL, generateAndFetchDatabaseUser } from '../auth/utilities';
@@ -120,26 +119,6 @@ describe('Verify Action API Key Scope', () => {
         );
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         globalThis.templateUuid = createdTemplate.uuid;
-
-        // 5. Create a Worker
-        const workerRepo = database.getRepository(WorkerEntity);
-        const worker = workerRepo.create({
-            identifier: 'test-worker-id',
-            hostname: 'test-host',
-            reachable: true,
-            lastSeen: new Date(),
-            cpuMemory: 1000,
-            cpuCores: 4,
-            cpuModel: 'test-cpu',
-            storage: 1000,
-            gpuMemory: -1,
-        });
-        await workerRepo.save(worker);
-
-        // Initialize queue for this worker (normally done by ActionDispatcherService.onModuleInit)
-        // The healthCheck cron runs every 30 seconds and will initialize queues for new workers
-        // We need to wait for it to run at least once
-        // await new Promise((resolve) => setTimeout(resolve, 35000));
     }, 40_000); // 40-second timeout for beforeEach
 
     afterEach(async () => {
@@ -149,7 +128,6 @@ describe('Verify Action API Key Scope', () => {
             { name: 'Missions', entity: MissionEntity },
             { name: 'Projects', entity: ProjectEntity },
             { name: 'ApiKeys', entity: ApiKeyEntity },
-            { name: 'Workers', entity: WorkerEntity },
         ];
 
         for (const repo of repos) {

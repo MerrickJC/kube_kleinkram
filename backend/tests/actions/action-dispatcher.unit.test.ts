@@ -1,297 +1,240 @@
 import {
-    AccessControlService,
     ActionEntity,
     ActionTemplateEntity,
     MissionEntity,
     UserEntity,
-    WorkerEntity,
 } from '@kleinkram/backend-common';
+import { AccessControlService } from '@kleinkram/backend-common/modules/access-control/access-control.service';
 import { ActionDispatcherService } from '@kleinkram/backend-common/modules/action-dispatcher/action-dispatcher.service';
-import * as schedulingLogic from '@kleinkram/backend-common/scheduling-logic';
+import { ActionQueueJob } from '@kleinkram/backend-common/modules/action-dispatcher/action-queue.constants';
 import { ActionState, ActionTriggerSource, UserRole } from '@kleinkram/shared';
-import { Gauge } from 'prom-client';
-import { EntityManager, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
-// Mock scheduling logic
-jest.mock('@kleinkram/backend-common/scheduling-logic', () => ({
-    addActionQueue: jest.fn(),
-}));
-
-// Mock axios for Loki health check
-jest.mock('axios', () => ({
-    get: jest.fn().mockResolvedValue({ status: 200 }),
-}));
-
-// Mock ioredis
-jest.mock('ioredis', () => {
-    return jest.fn().mockImplementation(() => {
-        return {
-            publish: jest.fn().mockResolvedValue(1),
-            quit: jest.fn().mockResolvedValue('OK'),
-        };
-    });
-});
+interface MockActionQueue {
+    add: jest.Mock;
+    getJob: jest.Mock;
+}
 
 describe('ActionDispatcherService Unit Tests', () => {
     let service: ActionDispatcherService;
     let actionRepo: Repository<ActionEntity>;
     let templateRepo: Repository<ActionTemplateEntity>;
-    let workerRepo: Repository<WorkerEntity>;
     let accessControlService: AccessControlService;
-    let gauge: Gauge;
+    let mockQueue: MockActionQueue;
+
+    const mission = { uuid: 'mission-uuid' } as MissionEntity;
+    const creator = { uuid: 'user-uuid', role: UserRole.USER } as UserEntity;
 
     beforeEach(() => {
         actionRepo = {
             create: jest.fn(),
             save: jest.fn(),
             update: jest.fn(),
-            manager: {
-                transaction: jest.fn(),
-            } as unknown as EntityManager,
+            findOneOrFail: jest.fn(),
         } as unknown as Repository<ActionEntity>;
 
         templateRepo = {
             findOneOrFail: jest.fn(),
         } as unknown as Repository<ActionTemplateEntity>;
 
-        workerRepo = {
-            find: jest.fn(),
-        } as unknown as Repository<WorkerEntity>;
-
         accessControlService = {
             canAccessMission: jest.fn(),
         } as unknown as AccessControlService;
 
-        gauge = {
-            set: jest.fn(),
-        } as unknown as Gauge;
-
         service = new ActionDispatcherService(
             actionRepo,
             templateRepo,
-            workerRepo,
-            gauge,
-            gauge,
-            gauge,
-            gauge,
-            gauge,
             accessControlService,
         );
+
+        // Bypass onModuleInit (which would open a real Bull/Redis connection)
+        // and inject a mock queue directly, matching how the service uses it.
+        mockQueue = {
+            add: jest.fn().mockResolvedValue(undefined),
+            getJob: jest.fn().mockResolvedValue(undefined),
+        };
+        (service as unknown as { actionQueue: MockActionQueue }).actionQueue =
+            mockQueue;
     });
 
-    test('dispatch should mark action as UNPROCESSABLE when queue rejection occurs after retry', async () => {
-        const mission = { uuid: 'mission-uuid' } as MissionEntity;
-        const creator = {
-            uuid: 'user-uuid',
-            role: UserRole.USER,
-        } as UserEntity;
+    describe('dispatch', () => {
+        test('throws ConflictException and creates no action when access is denied', async () => {
+            (templateRepo.findOneOrFail as jest.Mock).mockResolvedValue({
+                uuid: 'template-uuid',
+                accessRights: 0,
+            });
+            (
+                accessControlService.canAccessMission as jest.Mock
+            ).mockResolvedValue(false);
 
-        (templateRepo.findOneOrFail as jest.Mock).mockResolvedValue({
-            uuid: 'template-uuid',
-            cpuCores: 1,
-            cpuMemory: 512,
-            gpuMemory: 0,
-            maxRuntime: 60,
-            accessRights: 0,
+            await expect(
+                service.dispatch(
+                    'template-uuid',
+                    mission,
+                    creator,
+                    {},
+                    ActionTriggerSource.MANUAL,
+                ),
+            ).rejects.toThrow('Creator no longer has access to this mission');
+
+            expect(actionRepo.create).not.toHaveBeenCalled();
+            expect(mockQueue.add).not.toHaveBeenCalled();
         });
 
-        (accessControlService.canAccessMission as jest.Mock).mockResolvedValue(
-            true,
-        );
+        test('creates a PENDING action and enqueues a SUBMIT job on success', async () => {
+            (templateRepo.findOneOrFail as jest.Mock).mockResolvedValue({
+                uuid: 'template-uuid',
+                accessRights: 0,
+            });
+            (
+                accessControlService.canAccessMission as jest.Mock
+            ).mockResolvedValue(true);
+            (actionRepo.create as jest.Mock).mockImplementation(
+                (data) => data as ActionEntity,
+            );
+            (actionRepo.save as jest.Mock).mockImplementation((data) =>
+                Promise.resolve({ ...data, uuid: 'action-uuid' }),
+            );
 
-        (actionRepo.create as jest.Mock).mockImplementation(
-            (d) => d as ActionEntity,
-        );
-        const saveSpy = (actionRepo.save as jest.Mock).mockImplementation((d) =>
-            Promise.resolve({ ...d, uuid: 'action-uuid' } as ActionEntity),
-        );
-        const updateSpy = (actionRepo.update as jest.Mock).mockResolvedValue(
-            {},
-        );
-
-        // Mock addActionQueue to return undefined (failure)
-        const addActionQueueSpy = (
-            schedulingLogic.addActionQueue as jest.Mock
-        ).mockImplementation(() => Promise.resolve());
-
-        // Spy on healthCheck
-        const healthCheckSpy = jest
-            .spyOn(service, 'healthCheck')
-            .mockImplementation(() => Promise.resolve());
-
-        await expect(
-            service.dispatch(
+            const result = await service.dispatch(
                 'template-uuid',
                 mission,
                 creator,
                 {},
                 ActionTriggerSource.MANUAL,
-            ),
-        ).rejects.toThrow('No worker available');
+                'trigger-uuid',
+            );
 
-        expect(updateSpy).toHaveBeenCalledWith('action-uuid', {
-            state: ActionState.UNPROCESSABLE,
-            // eslint-disable-next-line @typescript-eslint/naming-convention
-            state_cause: 'Resources unavailable or queue error',
+            expect(result).toBe('action-uuid');
+            expect(actionRepo.create).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    mission,
+                    creator,
+                    state: ActionState.PENDING,
+                    triggerSource: ActionTriggerSource.MANUAL,
+                    triggerUuid: 'trigger-uuid',
+                }),
+            );
+            expect(mockQueue.add).toHaveBeenCalledWith(
+                ActionQueueJob.SUBMIT,
+                { uuid: 'action-uuid' },
+                expect.objectContaining({
+                    jobId: `${ActionQueueJob.SUBMIT}-action-uuid`,
+                    attempts: 3,
+                }),
+            );
         });
 
-        expect(saveSpy).toHaveBeenCalled();
-        expect(healthCheckSpy).toHaveBeenCalled();
-        expect(addActionQueueSpy).toHaveBeenCalledTimes(2);
+        test('marks the action UNPROCESSABLE and rethrows when enqueueing fails', async () => {
+            (templateRepo.findOneOrFail as jest.Mock).mockResolvedValue({
+                uuid: 'template-uuid',
+                accessRights: 0,
+            });
+            (
+                accessControlService.canAccessMission as jest.Mock
+            ).mockResolvedValue(true);
+            (actionRepo.create as jest.Mock).mockImplementation(
+                (data) => data as ActionEntity,
+            );
+            (actionRepo.save as jest.Mock).mockImplementation((data) =>
+                Promise.resolve({ ...data, uuid: 'action-uuid' }),
+            );
+            mockQueue.add.mockRejectedValue(new Error('redis unreachable'));
+
+            await expect(
+                service.dispatch(
+                    'template-uuid',
+                    mission,
+                    creator,
+                    {},
+                    ActionTriggerSource.MANUAL,
+                ),
+            ).rejects.toThrow('Failed to dispatch action');
+
+            expect(actionRepo.update).toHaveBeenCalledWith('action-uuid', {
+                state: ActionState.UNPROCESSABLE,
+                // eslint-disable-next-line @typescript-eslint/naming-convention
+                state_cause: 'Failed to submit action for dispatch',
+            });
+        });
     });
 
     describe('stopAction', () => {
-        test('should successfully stop running action, remove from queue and publish cancellation', async () => {
-            const mockManager = {
-                findOne: jest.fn().mockResolvedValue({
-                    uuid: 'action-uuid',
-                    worker: {
-                        identifier: 'worker-identifier',
-                    },
-                    state: ActionState.PROCESSING,
-                }),
-                save: jest.fn().mockResolvedValue({}),
-            };
-
-            (actionRepo.manager.transaction as jest.Mock).mockImplementation(
-                (
-                    callback: (mgr: EntityManager) => Promise<unknown>,
-                ): Promise<unknown> => {
-                    return callback(mockManager as unknown as EntityManager);
-                },
-            );
-
-            const mockJob = {
-                remove: jest.fn().mockResolvedValue(void 0),
-            };
-            const mockQueue = {
-                getJob: jest.fn().mockResolvedValue(mockJob),
-            };
-            const mockActionQueues: Record<string, unknown> = {
-                ['worker-identifier']: mockQueue,
-            };
-            (service as unknown as Record<string, unknown>).actionQueues =
-                mockActionQueues;
-
-            const mockRedis = {
-                publish: jest.fn().mockResolvedValue(1),
-            };
-            (service as unknown as Record<string, unknown>).redisPublisher =
-                mockRedis;
+        test('cancels the action, removes the queued submit job, and enqueues a CANCEL job', async () => {
+            const action = { uuid: 'action-uuid', state: ActionState.PENDING };
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(action);
+            (actionRepo.save as jest.Mock).mockResolvedValue(action);
+            const mockJob = { remove: jest.fn().mockResolvedValue(undefined) };
+            mockQueue.getJob.mockResolvedValue(mockJob);
 
             await service.stopAction('action-uuid');
 
-            expect(mockManager.findOne).toHaveBeenCalledWith(ActionEntity, {
-                where: { uuid: 'action-uuid' },
-                relations: { worker: true },
-            });
-            expect(mockManager.save).toHaveBeenCalledWith(
+            expect(actionRepo.save).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    uuid: 'action-uuid',
                     state: ActionState.CANCELLED,
                     // eslint-disable-next-line @typescript-eslint/naming-convention
                     state_cause: 'Action cancelled by user',
                 }),
             );
-            expect(mockQueue.getJob).toHaveBeenCalledWith('action-uuid');
+            expect(mockQueue.getJob).toHaveBeenCalledWith(
+                `${ActionQueueJob.SUBMIT}-action-uuid`,
+            );
             expect(mockJob.remove).toHaveBeenCalled();
-            expect(mockRedis.publish).toHaveBeenCalledWith(
-                'action-cancellation',
-                'action-uuid',
+            expect(mockQueue.add).toHaveBeenCalledWith(
+                ActionQueueJob.CANCEL,
+                { uuid: 'action-uuid' },
+                expect.objectContaining({
+                    jobId: `${ActionQueueJob.CANCEL}-action-uuid`,
+                }),
             );
         });
 
-        test('should throw Error if no worker found for the action', async () => {
-            const mockManager = {
-                findOne: jest.fn().mockResolvedValue({
-                    uuid: 'action-uuid',
-                    worker: undefined,
-                    state: ActionState.PROCESSING,
-                }),
-            };
+        test('still enqueues a CANCEL job when no queued submit job exists', async () => {
+            const action = { uuid: 'action-uuid', state: ActionState.PENDING };
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(action);
+            (actionRepo.save as jest.Mock).mockResolvedValue(action);
+            mockQueue.getJob.mockResolvedValue(undefined);
 
-            (actionRepo.manager.transaction as jest.Mock).mockImplementation(
-                (
-                    callback: (mgr: EntityManager) => Promise<unknown>,
-                ): Promise<unknown> => {
-                    return callback(mockManager as unknown as EntityManager);
-                },
-            );
+            await expect(
+                service.stopAction('action-uuid'),
+            ).resolves.toBeUndefined();
 
-            await expect(service.stopAction('action-uuid')).rejects.toThrow(
-                'No worker found for this action',
+            expect(mockQueue.add).toHaveBeenCalledWith(
+                ActionQueueJob.CANCEL,
+                { uuid: 'action-uuid' },
+                expect.anything(),
             );
         });
 
-        test('should throw ConflictException if worker queue is not active', async () => {
-            const mockManager = {
-                findOne: jest.fn().mockResolvedValue({
-                    uuid: 'action-uuid',
-                    worker: {
-                        identifier: 'inactive-worker',
-                    },
-                    state: ActionState.PROCESSING,
-                }),
-                save: jest.fn().mockResolvedValue({}),
+        test('still enqueues a CANCEL job when removing the submit job throws', async () => {
+            const action = { uuid: 'action-uuid', state: ActionState.PENDING };
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(action);
+            (actionRepo.save as jest.Mock).mockResolvedValue(action);
+            const mockJob = {
+                remove: jest.fn().mockRejectedValue(new Error('already active')),
             };
+            mockQueue.getJob.mockResolvedValue(mockJob);
 
-            (actionRepo.manager.transaction as jest.Mock).mockImplementation(
-                (
-                    callback: (mgr: EntityManager) => Promise<unknown>,
-                ): Promise<unknown> => {
-                    return callback(mockManager as unknown as EntityManager);
-                },
-            );
+            await expect(
+                service.stopAction('action-uuid'),
+            ).resolves.toBeUndefined();
 
-            (service as unknown as Record<string, unknown>).actionQueues = {};
-
-            await expect(service.stopAction('action-uuid')).rejects.toThrow(
-                'Worker queue not active',
+            expect(mockQueue.add).toHaveBeenCalledWith(
+                ActionQueueJob.CANCEL,
+                { uuid: 'action-uuid' },
+                expect.anything(),
             );
         });
 
-        test('should publish cancellation even if job is not found in the queue', async () => {
-            const mockManager = {
-                findOne: jest.fn().mockResolvedValue({
-                    uuid: 'action-uuid',
-                    worker: {
-                        identifier: 'worker-identifier',
-                    },
-                    state: ActionState.PROCESSING,
-                }),
-                save: jest.fn().mockResolvedValue({}),
-            };
-
-            (actionRepo.manager.transaction as jest.Mock).mockImplementation(
-                (
-                    callback: (mgr: EntityManager) => Promise<unknown>,
-                ): Promise<unknown> => {
-                    return callback(mockManager as unknown as EntityManager);
-                },
+        test('propagates the error when the action cannot be found', async () => {
+            (actionRepo.findOneOrFail as jest.Mock).mockRejectedValue(
+                new Error('not found'),
             );
 
-            const mockQueue = {
-                getJob: jest.fn().mockResolvedValue(null),
-            };
-            const mockActionQueues: Record<string, unknown> = {
-                ['worker-identifier']: mockQueue,
-            };
-            (service as unknown as Record<string, unknown>).actionQueues =
-                mockActionQueues;
-
-            const mockRedis = {
-                publish: jest.fn().mockResolvedValue(1),
-            };
-            (service as unknown as Record<string, unknown>).redisPublisher =
-                mockRedis;
-
-            await service.stopAction('action-uuid');
-
-            expect(mockQueue.getJob).toHaveBeenCalledWith('action-uuid');
-            expect(mockRedis.publish).toHaveBeenCalledWith(
-                'action-cancellation',
-                'action-uuid',
+            await expect(service.stopAction('missing-uuid')).rejects.toThrow(
+                'not found',
             );
+            expect(mockQueue.add).not.toHaveBeenCalled();
         });
     });
 });

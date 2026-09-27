@@ -8,7 +8,6 @@ import { IngestionJobEntity } from '@kleinkram/backend-common/entities/file/inge
 import { MetadataEntity } from '@kleinkram/backend-common/entities/metadata/metadata.entity';
 import { MissionEntity } from '@kleinkram/backend-common/entities/mission/mission.entity';
 import { ProjectEntity } from '@kleinkram/backend-common/entities/project/project.entity';
-import { WorkerEntity } from '@kleinkram/backend-common/entities/worker/worker.entity';
 import { StorageModule } from '@kleinkram/backend-common/modules/storage/storage.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -28,17 +27,11 @@ import { TriggerModule } from '../trigger/trigger.module';
             ProjectEntity,
             MetadataEntity,
             FileEntity,
-            WorkerEntity,
             ActionEntity,
         ]),
     ],
     providers: [
         QueueService,
-        makeGaugeProvider({
-            name: 'backend_online_workers',
-            help: 'Number of online workers',
-            labelNames: ['queue'],
-        }),
         makeGaugeProvider({
             name: 'backend_pending_jobs',
             help: 'Number of pending jobs',

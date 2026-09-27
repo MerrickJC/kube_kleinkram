@@ -337,15 +337,8 @@
 
             <div class="col-12 col-sm-6">
                 <AppInput
-                    label="Runner CPU Model"
-                    :model-value="action.worker?.cpuModel || 'N/A'"
-                    readonly
-                />
-            </div>
-            <div class="col-12 col-sm-6">
-                <AppInput
-                    label="Runner Hostname"
-                    :model-value="action.worker?.hostname || 'N/A'"
+                    label="Argo Workflow"
+                    :model-value="action.workflowName || 'N/A'"
                     readonly
                 />
             </div>

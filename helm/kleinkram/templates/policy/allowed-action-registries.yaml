@@ -1,0 +1,32 @@
+{{- if .Values.policy.kyverno.enabled }}
+# Requires Kyverno to already be installed in the cluster
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: kleinkram-restrict-action-images
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: restrict-action-pod-images
+      match:
+        any:
+          - resources:
+              kinds: ['Pod']
+              namespaces:
+                - {{ .Values.namespaces.actions }}
+      validate:
+        message: >-
+          Action container images must come from an allowed registry/namespace.
+        foreach:
+          - list: 'request.object.spec.containers'
+            deny:
+              conditions:
+                all:
+                  - key: '{{`{{ element.image }}`}}'
+                    operator: AnyNotIn
+                    value:
+                      {{- toYaml .Values.policy.kyverno.allowedImageRegistries | nindent 22 }}
+{{- end }}

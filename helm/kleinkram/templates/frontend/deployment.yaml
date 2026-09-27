@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleinkram-frontend
+  namespace: {{ .Values.namespaces.app }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kleinkram.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        {{- include "kleinkram.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+    spec:
+      {{- if .Values.image.pullSecrets -}}
+      {{- include "kleinkram.imagePullSecrets" .Values.image.pullSecrets | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: frontend
+          image: {{ include "kleinkram.image" (dict "root" $ "service" "frontend") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.frontend.containerPort }}
+          # No env vars: BACKEND_URL/VITE_S3_ENDPOINT/etc. are baked into the
+          # static bundle at image build time, not read at container runtime.
+          readinessProbe:
+            httpGet: { path: /, port: {{ .Values.frontend.containerPort }} }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: {{ .Values.frontend.containerPort }} }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}

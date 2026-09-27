@@ -16,7 +16,6 @@ import { ActionEntity } from '@kleinkram/backend-common/entities/action/action.e
 import { FileEntity } from '@kleinkram/backend-common/entities/file/file.entity';
 import { MissionEntity } from '@kleinkram/backend-common/entities/mission/mission.entity';
 import { UserEntity } from '@kleinkram/backend-common/entities/user/user.entity';
-import environment from '@kleinkram/backend-common/environment';
 import { ActionDispatcherService } from '@kleinkram/backend-common/modules/action-dispatcher/action-dispatcher.service';
 import { IStorageBucket } from '@kleinkram/backend-common/modules/storage/types';
 import {
@@ -185,18 +184,13 @@ export class ActionService {
                 template: {
                     creator: true,
                 },
-
-                worker: true,
             },
         });
 
         const dto = actionEntityToDto(action);
 
         if (dto.artifacts === ArtifactState.UPLOADED) {
-            dto.artifactUrl = await this.generateArtifactUrl(
-                dto.artifactUrl,
-                action,
-            );
+            dto.artifactUrl = await this.generateArtifactUrl(action);
         }
 
         return dto;
@@ -473,21 +467,16 @@ export class ActionService {
         );
     }
 
-    private async generateArtifactUrl(
-        currentUrl: string,
-        action: ActionEntity,
-    ): Promise<string> {
-        const bucketName = environment.S3_ARTIFACTS_BUCKET_NAME;
-
-        if (currentUrl && !currentUrl.includes(bucketName)) {
-            return currentUrl;
-        }
-
+    private async generateArtifactUrl(action: ActionEntity): Promise<string> {
         try {
             const friendlyFilename = `${action.template?.name ?? 'artifact'}-${action.uuid}.tar.gz`;
 
+            if (!action.artifact_path) {
+                throw new Error('No artifact path recorded for this action');
+            }
+
             return await this.artifactStorage.getPresignedDownloadUrl(
-                `${action.uuid}.tar.gz`,
+                action.artifact_path,
                 4 * 60 * 60,
                 {
                     // eslint-disable-next-line @typescript-eslint/naming-convention

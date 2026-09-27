@@ -241,6 +241,10 @@ export default withMermaid({
                             text: 'GitHub Actions',
                             link: '/development/github-actions.md',
                         },
+                        {
+                            text: 'Kubernetes Deployment',
+                            link: '/development/kubernetes-deployment.md',
+                        },
                     ],
                     collapsed: true,
                 },

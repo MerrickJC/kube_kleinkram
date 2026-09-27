@@ -138,10 +138,7 @@ services:
             target: production
             additional_contexts:
                 kleinkram-base: service:base
-                artifact-uploader: service:artifact-uploader
         volumes:
-            # mount docker socket to access docker from within the container
-            - /var/run/docker.sock:/var/run/docker.sock
             - ./google-service-account.json:/app/queueConsumer/google-service-account.json:ro
         environment:
             REDIS_HOST: 'redis'
@@ -160,12 +157,6 @@ services:
         networks:
             - privatenet
             - webnet
-
-    artifact-uploader:
-        image: rslethz/kleinkram:artifact-uploader-latest
-        build:
-            context: queueConsumer/src/artifactUpload
-            dockerfile: Dockerfile
 
 volumes:
     db_data_test:

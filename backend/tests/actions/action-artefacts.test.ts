@@ -4,11 +4,7 @@ import { AccessGroupRights, ArtifactState } from '@kleinkram/shared';
 import { DEFAULT_URL } from '../auth/utilities';
 import { createActionUsingPost, getAuthHeaders } from '../utils/api-calls';
 import { database } from '../utils/database-utilities';
-import {
-    createMockWorker,
-    setupDatabaseHooks,
-    setupTestEnvironment,
-} from '../utils/test-helpers';
+import { setupDatabaseHooks, setupTestEnvironment } from '../utils/test-helpers';
 
 describe('Action Artefacts Tests', () => {
     setupDatabaseHooks();
@@ -32,9 +28,6 @@ describe('Action Artefacts Tests', () => {
             },
             user,
         );
-
-        // Create Worker to avoid 409 on submission
-        await createMockWorker('test-worker-artefact');
 
         // Submit Action
         const submitResponse = await fetch(`${DEFAULT_URL}/actions`, {

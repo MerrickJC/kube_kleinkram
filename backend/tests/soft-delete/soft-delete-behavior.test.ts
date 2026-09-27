@@ -7,7 +7,6 @@ import {
     MissionEntity,
     ProjectEntity,
     UserEntity,
-    WorkerEntity,
 } from '@kleinkram/backend-common';
 import { AccessGroupRights, FileType, KeyTypes } from '@kleinkram/shared';
 import { DEFAULT_URL, generateAndFetchDatabaseUser } from '../auth/utilities';
@@ -59,7 +58,7 @@ describe('Comprehensive Soft Delete Behavior', () => {
 
     beforeEach(async () => {
         await clearAllData();
-        // Re-mock users after clear because clearAllData clears everything except workers
+        // Re-mock users after clear because clearAllData truncates every table
         ({ user: admin } = await generateAndFetchDatabaseUser(
             'internal',
             'admin',
@@ -265,41 +264,6 @@ describe('Comprehensive Soft Delete Behavior', () => {
         const activeFiles = await fileRepo.find({ where: { filename } });
         expect(activeFiles.length).toBe(1);
         expect(activeFiles[0].uuid).toBe(file2.uuid);
-    });
-
-    test('Worker soft delete and re-creation', async () => {
-        const workerRepo = database.getRepository(WorkerEntity);
-        const identifier = 'test-worker-01';
-
-        const workerData = {
-            identifier,
-            hostname: 'localhost',
-            cpuMemory: 16,
-            gpuMemory: 8,
-            cpuCores: 8,
-            cpuModel: 'Intel',
-            storage: 100,
-            lastSeen: new Date(),
-            reachable: true,
-        };
-
-        // 1. Create Worker
-        const worker = workerRepo.create(workerData);
-        await workerRepo.save(worker);
-
-        // 2. Soft-delete Worker
-        await workerRepo.softRemove(worker);
-
-        // 3. Re-create Worker with SAME identifier
-        const worker2 = workerRepo.create(workerData);
-        await workerRepo.save(worker2);
-
-        // 4. Verify
-        const allWorkers = await workerRepo.find({
-            where: { identifier },
-            withDeleted: true,
-        });
-        expect(allWorkers.length).toBe(2);
     });
 
     test('ApiKey soft delete and re-creation', async () => {

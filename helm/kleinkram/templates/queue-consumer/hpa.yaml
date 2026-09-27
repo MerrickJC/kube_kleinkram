@@ -1,0 +1,23 @@
+{{- if .Values.queueConsumer.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kleinkram-queue-consumer
+  namespace: {{ .Values.namespaces.app }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kleinkram-queue-consumer
+  minReplicas: {{ .Values.queueConsumer.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.queueConsumer.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.queueConsumer.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

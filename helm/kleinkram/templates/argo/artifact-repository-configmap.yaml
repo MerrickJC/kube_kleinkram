@@ -1,0 +1,21 @@
+# Points Argo's built-in artifact upload at the already-installed SeaweedFS
+# bucket which Kleinkram writes artifacts to
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.argo.artifactRepository.configMapName }}
+  namespace: {{ .Values.namespaces.actions }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+data:
+  {{ .Values.argo.artifactRepository.key }}: |
+    s3:
+      bucket: {{ .Values.config.s3ArtifactsBucketName }}
+      endpoint: {{ .Values.config.s3Endpoint | trimPrefix "http://" | trimPrefix "https://" | quote }}
+      insecure: {{ .Values.argo.artifactRepository.insecure }}
+      accessKeySecret:
+        name: {{ .Values.argo.artifactRepository.credentialsSecretName }}
+        key: accessKey
+      secretKeySecret:
+        name: {{ .Values.argo.artifactRepository.credentialsSecretName }}
+        key: secretKey

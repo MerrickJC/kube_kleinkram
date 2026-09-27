@@ -1,4 +1,5 @@
 # this file defines a reference integration (dev branch) setup of Kleinkram
+# Note: Actions execution now requires Kubernetes/Argo Workflows/Kueue
 services:
     base:
         image: kleinkram-base
@@ -7,7 +8,7 @@ services:
             dockerfile: docker/base.Dockerfile
 
     api-server:
-        image: rslethz/kleinkram:api-server-dev
+        image: registry.merrickcampbell.au/kleinkram:api-server-dev
         container_name: kleinkram-api-server-dev
 
         build:
@@ -82,7 +83,7 @@ services:
             - privatenet
 
     frontend:
-        image: rslethz/kleinkram:frontend-dev
+        image: registry.merrickcampbell.au/kleinkram:frontend-dev
         container_name: kleinkram-frontend-dev
 
         build:
@@ -114,7 +115,7 @@ services:
             - privatenet
 
     queue-consumer:
-        image: rslethz/kleinkram:queue-consumer-dev
+        image: registry.merrickcampbell.au/kleinkram:queue-consumer-dev
         container_name: kleinkram-queue-consumer-dev
         build:
             context: .
@@ -128,12 +129,7 @@ services:
             - database
             - loki
         volumes:
-            # mount docker socket to access docker from within the container
-            - /var/run/docker.sock:/var/run/docker.sock
             - ./google-service-account.json:/app/queueConsumer/google-service-account.json:ro
-        # Add docker group to allow access to docker socket
-        group_add:
-            - ${DOCKER_GID:-999}
     prometheus:
         image: prom/prometheus
         container_name: kleinkram-prometheus-dev
@@ -196,7 +192,7 @@ services:
     documentation:
         depends_on:
             - api-server
-        image: rslethz/kleinkram:docs-dev
+        image: registry.merrickcampbell.au/kleinkram:docs-dev
         container_name: kleinkram-documentation-dev
         volumes:
             - swagger-spec:/app/src/docs/
@@ -208,12 +204,6 @@ services:
                 - MODE=staging
         ports:
             - '4000:80'
-
-    artifact-uploader:
-        image: rslethz/kleinkram:artifact-uploader-dev
-        build:
-            context: queueConsumer/src/artifactUpload
-            dockerfile: Dockerfile
 
 volumes:
     postgres_db_data:

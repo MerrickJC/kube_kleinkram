@@ -5,11 +5,7 @@ import { createActionUsingPost, getAuthHeaders } from '../utils/api-calls';
 
 import { ActionEntity, ActionTemplateEntity } from '@kleinkram/backend-common';
 import { DEFAULT_URL } from '../auth/utilities';
-import {
-    createMockWorker,
-    setupDatabaseHooks,
-    setupTestEnvironment,
-} from '../utils/test-helpers';
+import { setupDatabaseHooks, setupTestEnvironment } from '../utils/test-helpers';
 
 describe('Action Management Tests', () => {
     setupDatabaseHooks();
@@ -82,11 +78,7 @@ describe('Action Management Tests', () => {
             user,
         );
 
-        // Create Worker
-        await createMockWorker('test-worker-run');
-
         // Submit action
-
         await fetch(`${DEFAULT_URL}/actions`, {
             method: 'POST',
             headers: {
@@ -99,8 +91,6 @@ describe('Action Management Tests', () => {
                 templateUUID: templateUuid,
             }),
         });
-        // Expect 409 because no worker is available (unless we mock it like in action-file-events)
-        // or 201 if we don't care about execution success but just submission.
     }, 30_000);
 
     test('should attempt to cancel a pending action run and transition state', async () => {
@@ -122,9 +112,6 @@ describe('Action Management Tests', () => {
             },
             user,
         );
-
-        // Create Worker
-        await createMockWorker('test-worker-cancel');
 
         // Submit action
         const submitResponse = await fetch(`${DEFAULT_URL}/actions`, {
@@ -193,8 +180,6 @@ describe('Action Management Tests', () => {
             user,
         );
 
-        await createMockWorker('test-worker-cancel-running');
-
         // Submit action
         const submitResponse = await fetch(`${DEFAULT_URL}/actions`, {
             method: 'POST',
@@ -260,8 +245,6 @@ describe('Action Management Tests', () => {
             },
             user,
         );
-
-        await createMockWorker('test-worker-cancel-starting');
 
         // Submit action
         const submitResponse = await fetch(`${DEFAULT_URL}/actions`, {
@@ -329,8 +312,6 @@ describe('Action Management Tests', () => {
             user,
         );
 
-        await createMockWorker('test-worker-cancel-done');
-
         // Submit action
         const submitResponse = await fetch(`${DEFAULT_URL}/actions`, {
             method: 'POST',
@@ -396,8 +377,6 @@ describe('Action Management Tests', () => {
             user,
         );
 
-        await createMockWorker('test-worker-delete-cancelled');
-
         const submitResponse = await fetch(`${DEFAULT_URL}/actions`, {
             method: 'POST',
             headers: {
@@ -457,8 +436,6 @@ describe('Action Management Tests', () => {
             },
             user,
         );
-
-        await createMockWorker('test-worker-delete-running');
 
         const submitResponse = await fetch(`${DEFAULT_URL}/actions`, {
             method: 'POST',

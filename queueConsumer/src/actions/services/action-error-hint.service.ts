@@ -76,11 +76,14 @@ export class ActionErrorHintService {
     }
 
     private checkDockerImageNotFound(action: ActionEntity): boolean {
-        if (!action.state_cause) return false;
-        return (
-            action.state_cause.includes('failed to resolve reference') &&
-            action.state_cause.includes('not found')
-        );
+        const cause = action.state_cause ?? '';
+        const dockerStyle =
+            cause.includes('failed to resolve reference') &&
+            cause.includes('not found');
+        const kubernetesStyle =
+            cause.includes('ErrImagePull') ||
+            cause.includes('ImagePullBackOff');
+        return dockerStyle || kubernetesStyle;
     }
 
     private checkCliOutdated(logs: LogEntry[]): boolean {
@@ -99,12 +102,13 @@ export class ActionErrorHintService {
         action: ActionEntity,
         logs: LogEntry[],
     ): boolean {
-        const stateCause = action.state_cause;
-        if (
-            !stateCause?.includes(
+        const stateCause = action.state_cause ?? '';
+        const isMemoryKill =
+            stateCause.includes('OOMKilled') ||
+            stateCause.includes(
                 'Container killed (SIGKILL). Exceeded memory or CPU limit.',
-            )
-        ) {
+            );
+        if (!isMemoryKill) {
             return false;
         }
 

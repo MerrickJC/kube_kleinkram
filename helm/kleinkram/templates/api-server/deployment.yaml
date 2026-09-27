@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleinkram-api-server
+  namespace: {{ .Values.namespaces.app }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-server
+spec:
+  replicas: {{ .Values.apiServer.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kleinkram.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api-server
+  template:
+    metadata:
+      labels:
+        {{- include "kleinkram.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api-server
+    spec:
+      {{- if .Values.image.pullSecrets -}}
+      {{- include "kleinkram.imagePullSecrets" .Values.image.pullSecrets | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: api-server
+          image: {{ include "kleinkram.image" (dict "root" $ "service" "api-server") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.apiServer.port }}
+          envFrom:
+            - configMapRef: { name: kleinkram-config }
+            - secretRef: { name: {{ .Values.secretNames.db }} }
+            - secretRef: { name: {{ .Values.secretNames.s3 }} }
+            - secretRef: { name: {{ .Values.secretNames.jwt }} }
+            - secretRef: { name: {{ .Values.secretNames.googleOauth }} }
+            - secretRef: { name: {{ .Values.secretNames.githubOauth }} }
+          env:
+            - name: SERVER_PORT
+              value: {{ .Values.apiServer.port | quote }}
+          volumeMounts:
+            - name: google-service-account
+              mountPath: /app/secrets
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: {{ .Values.apiServer.probePath }}, port: {{ .Values.apiServer.port }} }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: {{ .Values.apiServer.probePath }}, port: {{ .Values.apiServer.port }} }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.apiServer.resources | nindent 12 }}
+      volumes:
+        - name: google-service-account
+          secret:
+            secretName: {{ .Values.secretNames.googleServiceAccount }}

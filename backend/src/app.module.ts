@@ -26,7 +26,6 @@ import { TemplatesModule } from './endpoints/templates/templates.module';
 import { TopicModule } from './endpoints/topic/topic.module';
 import { TriggerModule } from './endpoints/trigger/trigger.module';
 import { UserModule } from './endpoints/user/user.module';
-import { WorkerModule } from './endpoints/worker/worker.module';
 import { APIKeyResolverMiddleware } from './routing/middlewares/api-key-resolver-middleware.service';
 import { AuditLoggerMiddleware } from './routing/middlewares/audit-logger-middleware.service';
 import { VersionCheckerMiddlewareService } from './routing/middlewares/version-checker-middleware.service';
@@ -85,7 +84,6 @@ import { DBDumper } from './services/dbdumper.service';
         ActionModule,
         TemplatesModule,
         MetadataModule,
-        WorkerModule,
         CategoryModule,
         ScheduleModule.forRoot(),
         StorageModule,
