@@ -919,9 +919,24 @@ importers:
         specifier: ^6.1.7
         version: 6.1.7
     devDependencies:
+      '@jest/globals':
+        specifier: ^30.5.1
+        version: 30.5.1
       '@nestjs/cli':
         specifier: ^12.0.0
         version: 12.0.0(@swc/core@1.16.2)(@types/node@26.4.1)(fork-ts-checker-webpack-plugin@9.1.0(typescript@5.9.3)(webpack@5.110.3(@swc/core@1.16.2)(esbuild@0.28.2)))(prettier@3.9.6)(ts-loader@9.6.2(loader-utils@2.0.4)(typescript@5.9.3)(webpack@5.110.3(@swc/core@1.16.2)(esbuild@0.28.2)))(tsconfig-paths-webpack-plugin@4.2.0)(webpack-node-externals@3.0.0)(webpack@5.110.3(@swc/core@1.16.2)(esbuild@0.28.2))
+      '@nestjs/testing':
+        specifier: ^12.0.1
+        version: 12.0.1(@nestjs/common@12.0.1(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.1)(@nestjs/platform-express@12.0.1)
+      '@swc/core':
+        specifier: ^1.16.2
+        version: 1.16.2
+      '@swc/jest':
+        specifier: ^0.2.39
+        version: 0.2.39(@swc/core@1.16.2)
+      '@types/jest':
+        specifier: ^30.0.0
+        version: 30.0.0
       '@types/jsonwebtoken':
         specifier: ^9.0.10
         version: 9.0.10
@@ -937,9 +952,15 @@ importers:
       fork-ts-checker-webpack-plugin:
         specifier: ^9.1.0
         version: 9.1.0(typescript@5.9.3)(webpack@5.110.3(@swc/core@1.16.2)(esbuild@0.28.2))
+      jest:
+        specifier: ^30.5.1
+        version: 30.5.1(@types/node@26.4.1)(ts-node@10.9.2(@swc/core@1.16.2)(@swc/wasm@1.16.2)(@types/node@26.4.1)(typescript@5.9.3))
       run-script-webpack-plugin:
         specifier: ^0.2.3
         version: 0.2.3
+      ts-jest:
+        specifier: ^29.4.12
+        version: 29.4.12(@babel/core@7.29.7)(@jest/transform@30.5.1)(@jest/types@30.5.1)(babel-jest@30.5.1(@babel/core@7.29.7))(esbuild@0.28.2)(jest-util@30.5.1)(jest@30.5.1(@types/node@26.4.1)(ts-node@10.9.2(@swc/core@1.16.2)(@swc/wasm@1.16.2)(@types/node@26.4.1)(typescript@5.9.3)))(typescript@5.9.3)
       ts-loader:
         specifier: ^9.6.2
         version: 9.6.2(loader-utils@2.0.4)(typescript@5.9.3)(webpack@5.110.3(@swc/core@1.16.2)(esbuild@0.28.2))

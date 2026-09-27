@@ -7,7 +7,6 @@ import {
     HeaderCreator,
 } from '../utils/api-calls';
 import { clearAllData, database } from '../utils/database-utilities';
-import { createMockWorker } from '../utils/test-helpers';
 
 describe('Action Access Rights', () => {
     beforeAll(async () => {
@@ -132,9 +131,6 @@ describe('Action Access Rights', () => {
     });
 
     test('if a user can cancel an action based on their rights', async () => {
-        // Create worker first so actions can be submitted successfully
-        await createMockWorker('cancel-test-worker');
-
         // 1. Create a user (creator) and another user (member)
         const { user: creator } = await generateAndFetchDatabaseUser(
             'internal',

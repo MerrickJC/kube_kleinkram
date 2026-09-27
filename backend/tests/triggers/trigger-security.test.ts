@@ -7,24 +7,15 @@ import { ProjectAccessEntity } from '@kleinkram/backend-common/entities/auth/pro
 import { MissionEntity } from '@kleinkram/backend-common/entities/mission/mission.entity';
 import { ProjectEntity } from '@kleinkram/backend-common/entities/project/project.entity';
 import { UserEntity } from '@kleinkram/backend-common/entities/user/user.entity';
-import { WorkerEntity } from '@kleinkram/backend-common/entities/worker/worker.entity';
 import { AccessControlService } from '@kleinkram/backend-common/modules/access-control/access-control.service';
 import { ActionDispatcherService } from '@kleinkram/backend-common/modules/action-dispatcher/action-dispatcher.service';
 import { MissionAccessViewEntity } from '@kleinkram/backend-common/viewEntities/mission-access-view.entity';
 import { ProjectAccessViewEntity } from '@kleinkram/backend-common/viewEntities/project-access-view.entity';
 import { AccessGroupRights, Providers, UserRole } from '@kleinkram/shared';
-import { Gauge } from 'prom-client';
 import { EntityTarget, ObjectLiteral } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { database } from '../utils/database-utilities';
 import { setupDatabaseHooks } from '../utils/test-helpers';
-
-// Mock Gauge
-const mockGauge = {
-    set: jest.fn(),
-    inc: jest.fn(),
-    dec: jest.fn(),
-} as unknown as Gauge;
 
 // Repositories
 const getRepo = <T extends ObjectLiteral>(target: EntityTarget<T>) =>
@@ -113,12 +104,6 @@ describe('Trigger Security', () => {
         actionDispatcher = new ActionDispatcherService(
             getRepo(ActionEntity),
             getRepo(ActionTemplateEntity),
-            getRepo(WorkerEntity),
-            mockGauge, // backend_online_workers
-            mockGauge, // backend_pending_jobs
-            mockGauge, // backend_active_jobs
-            mockGauge, // backend_completed_jobs
-            mockGauge, // backend_failed_jobs
             accessControlService,
         );
     });

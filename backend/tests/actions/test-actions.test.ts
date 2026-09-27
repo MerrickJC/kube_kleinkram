@@ -7,7 +7,6 @@ import {
     MissionEntity,
     ProjectEntity,
     UserEntity,
-    WorkerEntity,
 } from '@kleinkram/backend-common';
 import { AccessGroupRights, ActionState } from '@kleinkram/shared';
 import { DEFAULT_URL, generateAndFetchDatabaseUser } from '../auth/utilities';
@@ -83,9 +82,6 @@ describe('Verify Action (Templates & Runs)', () => {
             // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
             response: globalThis.admin.response,
         } = await generateAndFetchDatabaseUser('internal', 'admin'));
-
-        // Initialize queue for this worker
-        // await new Promise((resolve) => setTimeout(resolve, 35000));
     });
 
     beforeEach(async () => {
@@ -100,22 +96,6 @@ describe('Verify Action (Templates & Runs)', () => {
             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
             where: { name: globalThis.user.name },
         });
-
-        // Create Worker
-        const workerRepo = database.getRepository(WorkerEntity);
-        const worker = workerRepo.create({
-            // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-            identifier: `test-worker-actions-id-${Date.now()}`,
-            hostname: 'test-host-actions',
-            reachable: true,
-            lastSeen: new Date(),
-            cpuMemory: 1000,
-            cpuCores: 4,
-            cpuModel: 'test-cpu',
-            storage: 1000,
-            gpuMemory: -1,
-        });
-        await workerRepo.save(worker);
 
         // 2. Generate Project
         // Creator has DELETE rights, User has CREATE rights

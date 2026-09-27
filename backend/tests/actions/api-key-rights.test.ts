@@ -9,7 +9,6 @@ import {
     MissionEntity,
     ProjectEntity,
     UserEntity,
-    WorkerEntity,
 } from '@kleinkram/backend-common';
 
 import { AccessGroupRights, ActionState, KeyTypes } from '@kleinkram/shared';
@@ -129,7 +128,6 @@ describe('Verify Action Access Rights', () => {
             { name: 'Missions', entity: MissionEntity },
             { name: 'Projects', entity: ProjectEntity },
             { name: 'ApiKeys', entity: ApiKeyEntity },
-            { name: 'Workers', entity: WorkerEntity },
         ];
 
         for (const repo of repos) {
