@@ -31,6 +31,8 @@ spec:
           envFrom:
             - configMapRef: { name: kleinkram-config }
           env:
+            - name: SERVER_PORT
+              value: {{ .Values.queueConsumer.port | quote }}
             {{- include "kleinkram.secretEnv" . | nindent 12 }}
           volumeMounts:
             - name: google-service-account
