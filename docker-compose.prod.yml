@@ -11,7 +11,7 @@ services:
             dockerfile: docker/base.Dockerfile
 
     api-server:
-        image: registry.merrickcampbell.au/kleinkram:api-server-latest
+        image: registry.direct.merrickcampbell.au/kleinkram:api-server-latest
         container_name: kleinkram-api-server-prod
 
         build:
@@ -85,7 +85,7 @@ services:
             - privatenet
 
     frontend:
-        image: registry.merrickcampbell.au/kleinkram:frontend-latest
+        image: registry.direct.merrickcampbell.au/kleinkram:frontend-latest
         container_name: kleinkram-frontend-prod
 
         build:
@@ -115,7 +115,7 @@ services:
             - privatenet
 
     queue-consumer:
-        image: registry.merrickcampbell.au/kleinkram:queue-consumer-latest
+        image: registry.direct.merrickcampbell.au/kleinkram:queue-consumer-latest
         container_name: kleinkram-queue-consumer-prod
         build:
             context: .
@@ -199,7 +199,7 @@ services:
             - privatenet
 
     documentation:
-        image: registry.merrickcampbell.au/kleinkram:docs-latest
+        image: registry.direct.merrickcampbell.au/kleinkram:docs-latest
         container_name: kleinkram-documentation-prod
         build:
             context: .
