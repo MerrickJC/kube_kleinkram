@@ -1,0 +1,51 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kleinkram-db-migrate
+  namespace: {{ .Values.namespaces.app }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-migrate
+  annotations:
+    # Runs before the api-server/queue-consumer Deployments are created or
+    # updated. before-hook-creation clears out a stuck Job from a previous
+    # (failed) release so this hook doesn't collide with it on retry.
+    'helm.sh/hook': pre-install,pre-upgrade
+    'helm.sh/hook-weight': '0'
+    'helm.sh/hook-delete-policy': before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "kleinkram.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: db-migrate
+    spec:
+      restartPolicy: Never
+      {{- if .Values.image.pullSecrets -}}
+      {{- include "kleinkram.imagePullSecrets" .Values.image.pullSecrets | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: db-migrate
+          image: {{ include "kleinkram.image" (dict "root" $ "service" "migrator") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            # Names match backend/migration/prod/production-datasource.config.ts,
+            # which is the same TypeORM CLI config used for manual migrations
+            # (see docs/development/migrations/migrations.md)
+            - name: prod_dbhost
+              value: {{ .Values.config.dbHost | quote }}
+            - name: prod_port
+              value: {{ .Values.config.dbPort | quote }}
+            - name: prod_dbname
+              value: {{ .Values.config.dbDatabase | quote }}
+            - name: prod_ssl
+              value: {{ .Values.migration.ssl | quote }}
+            - name: prod_dbuser
+              valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.db }}, key: {{ .Values.secretKeys.db.user }} } }
+            - name: prod_dbpassword
+              valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.db }}, key: {{ .Values.secretKeys.db.password }} } }
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+{{- end }}

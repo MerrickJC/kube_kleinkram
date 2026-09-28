@@ -40,6 +40,30 @@ services:
             - postgres
             - redis
 
+    # Not started by `docker compose up` (see profiles). Built so CI can push
+    # it for the Helm pre-install/pre-upgrade migration hook Job. You can run
+    # manually with `docker compose --profile tools run --rm migrator`
+    migrator:
+        image: registry.direct.merrickcampbell.au/kleinkram:migrator-latest
+        container_name: kleinkram-migrator-prod
+        profiles: ['tools']
+
+        build:
+            context: .
+            dockerfile: docker/backend.Dockerfile
+            target: migrator
+
+        env_file:
+            - .env
+        environment:
+            prod_dbhost: postgres
+
+        networks:
+            - privatenet
+
+        depends_on:
+            - postgres
+
     postgres:
         image: postgres:17
         container_name: kleinkram-postgres-prod

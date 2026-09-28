@@ -55,6 +55,19 @@ apiServer:
     targetCPUUtilizationPercentage: 70
   probePath: /api/health
 
+# Runs `typeorm migration:run` as a Helm pre-install/pre-upgrade hook Job,
+# using the `migrator` image built from docker/backend.Dockerfile's
+# `migrator` stage. Disable if you'd rather apply migrations manually. 
+# More details in docs/development/migrations/migrations.md
+migration:
+  enabled: true
+  # Set to 'true' if your Postgres requires ssl
+  ssl: 'false'
+  backoffLimit: 2
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
 frontend:
   replicaCount: 1
   containerPort: 80
