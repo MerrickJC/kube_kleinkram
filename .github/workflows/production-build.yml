@@ -18,8 +18,8 @@ jobs:
               id: version
               run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
             - working-directory: .
-              name: Build and push the Docker compose images
-              run: docker compose -f docker-compose.prod.yml build --push api-server frontend queue-consumer documentation
+              name: Build the Docker compose images
+              run: docker compose -f docker-compose.prod.yml build api-server frontend queue-consumer documentation
               env:
                   BACKEND_URL: ${{ vars.BACKEND_URL }}
                   GIT_BRANCH: ${{ github.ref_name }}
@@ -29,7 +29,12 @@ jobs:
             - name: Tag images with immutable app version
               run: |
                   for service in api-server frontend queue-consumer docs; do
-                    docker buildx imagetools create \
-                      --tag "registry.direct.merrickcampbell.au/kleinkram:${service}-${{ steps.version.outputs.version }}" \
-                      "registry.direct.merrickcampbell.au/kleinkram:${service}-latest"
+                    docker tag "registry.direct.merrickcampbell.au/kleinkram:${service}-latest" "registry.direct.merrickcampbell.au/kleinkram:${service}-${{ steps.version.outputs.version }}"
+                  done
+            - working-directory: .
+              name: push the docker images
+              run: |
+                  for service in api-server frontend queue-consumer docs; do
+                    docker push "registry.direct.merrickcampbell.au/kleinkram:${service}-latest"
+                    docker push "registry.direct.merrickcampbell.au/kleinkram:${service}-${{ steps.version.outputs.version }}"
                   done
