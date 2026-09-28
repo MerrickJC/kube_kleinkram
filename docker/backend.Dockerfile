@@ -31,6 +31,15 @@ RUN pnpm --filter @kleinkram/backend-common build
 RUN NODE_ENV=production pnpm --filter kleinkram-backend build
 RUN pnpm deploy --filter=kleinkram-backend --prod --legacy /prod/backend
 
+# Reuses the full monorepo checkout from `build` (source + devDependencies)
+# so the TypeORM CLI can resolve migrations/entities directly from
+# TypeScript, exactly as documented in docs/development/migrations/migrations.md
+FROM build AS migrator
+
+WORKDIR /app/backend
+
+CMD ["pnpm", "run", "typeorm", "migration:run", "-d", "migration/prod/migration.config.ts"]
+
 FROM gcr.io/distroless/nodejs22-debian12 AS production
 
 WORKDIR /app

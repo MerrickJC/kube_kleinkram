@@ -38,6 +38,30 @@ services:
             - redis
             - loki
 
+    # Not started by `docker compose up` (see profiles). Built so CI can push
+    # it for the Helm pre-install/pre-upgrade migration hook Job. You can run
+    # manually with `docker compose --profile tools run --rm migrator`
+    migrator:
+        image: registry.direct.merrickcampbell.au/kleinkram:migrator-dev
+        container_name: kleinkram-migrator-dev
+        profiles: ['tools']
+
+        build:
+            context: .
+            dockerfile: docker/backend.Dockerfile
+            target: migrator
+
+        env_file:
+            - .env
+        environment:
+            prod_dbhost: database
+
+        networks:
+            - privatenet
+
+        depends_on:
+            - database
+
     database:
         image: postgres:17
         container_name: kleinkram-postgres-dev
