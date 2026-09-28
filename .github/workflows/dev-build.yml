@@ -19,7 +19,7 @@ jobs:
               run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
             - working-directory: .
               name: Build and push the Docker compose images
-              run: docker compose -f docker-compose.dev.yml build --push
+              run: docker compose -f docker-compose.dev.yml build --push api-server frontend queue-consumer documentation
               env:
                   BACKEND_URL: ${{ vars.BACKEND_URL_DEV }}
                   GIT_BRANCH: ${{ github.ref_name }}
