@@ -4,4 +4,4 @@ description: >
   Kleinkram self-hosted robotics data platform - Kubernetes deployment. Deploys api-server, frontend, documentation, queue-consumer, and an in-cluster Redis. Includes binding objects for Kueue/Argo Workflows but does NOT install Kueue, Argo Workflows, Postgres, SeaweedFS, or the observability stack (Prometheus/Loki/Tempo/Promtail). Those components are expected to be managed at a cluster level independently of this helm chart (see DESIGN.md for details).
 type: application
 version: 0.1.0
-appVersion: '1.0.2'
+appVersion: '1.0.3'

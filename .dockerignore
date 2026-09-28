@@ -1,6 +1,6 @@
 # Local dev files
-node_modules
-dist
+**/node_modules
+**/dist
 .env*
 .git
 .gitignore
@@ -17,7 +17,7 @@ junit.xml
 coverage
 
 # Backend specific
-backend/tsconfig.tsbuildinfo
+**/tsconfig.tsbuildinfo
 backend/npm-debug.log*
 backend/yarn-debug.log*
 backend/yarn-error.log*
