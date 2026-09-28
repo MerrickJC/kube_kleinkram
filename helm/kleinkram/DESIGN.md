@@ -18,7 +18,7 @@ This chart only owns the resources whose lifecycle it controls. Shared cluster i
 - Prometheus, Loki, Tempo, and whatever log-shipping agent (e.g. Promtail) feeds Loki, if you want Action resource-usage metrics and log querying
 - A policy engine (Kyverno/Gatekeeper), if the image-registry allow-list policy under `templates/policy/` is enabled
 - The NVIDIA device plugin on any GPU node pool
-- Every `Secret` this app reads (`values.yaml`'s `secretNames`/`argo.artifactRepository.credentialsSecretName`). The chart only references Secret names, it never creates or contains secret material itself. See `values.yaml` for the exact Secret names and keys each one must contain.
+- Every `Secret` this app reads (`values.yaml`'s `secretNames.*`/`argo.artifactRepository.credentialsSecretName`). The chart only references Secret names, it never creates or contains secret material itself. The key names expected inside each Secret default to the app's own env var names but can be overriden using `secretKeys.*`/`argo.artifactRepository.credentialsSecretKeys` if the secret keys are different
 
 **Deployed by this chart:** the app's own `Deployment`/`Service`/`HPA` set (api-server, frontend, documentation, queue-consumer), an app-owned Redis `StatefulSet`, `ConfigMap`, RBAC for `queue-consumer`, a `ServiceAccount` the Action containers, `NetworkPolicy`, and the namespace-scoped objects that bind the app to the infrastructure above: Kueue `ResourceFlavor`/`ClusterQueue`/`LocalQueue`, the Argo S3 artifact-repository `ConfigMap`, and (optionally) the Kyverno `ClusterPolicy`.
 
