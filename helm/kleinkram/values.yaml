@@ -18,7 +18,7 @@ namespaces:
   actions: kleinkram-actions
 
 image:
-  registry: registry.merrickcampbell.au
+  registry: registry.direct.merrickcampbell.au
   repository: kleinkram
   # Left blank this uses the chart's `appVersion` by default
   # Set explicitly to one of the following.
@@ -35,7 +35,7 @@ image:
   # Names of pre-existing Secrets in the `namespaces.app` namespace, for
   # pulling from a private registry (e.g. if `registry`/`repository` above
   # point at your images instead of the upstream `docker.io/rslethz/kleinkram`).
-  # registry.merrickcampbell.au is our own Zot registry; whether a pullSecret
+  # registry.direct.merrickcampbell.au is our own Zot registry; whether a pullSecret
   # is needed here depends on whether it allows anonymous pulls - check the
   # registry's pull auth config and add one if required
   pullSecrets: []
@@ -240,7 +240,7 @@ policy:
   kyverno:
     enabled: false
     allowedImageRegistries:
-      - 'registry.merrickcampbell.au/action/*'
+      - 'registry.direct.merrickcampbell.au/action/*'
       - 'ghcr.io/leggedrobotics/*'
 
 # Restricts kleinkram-action egress. Configs modify DNS namespace and whitelist 
