@@ -15,7 +15,7 @@ data:
       insecure: {{ .Values.argo.artifactRepository.insecure }}
       accessKeySecret:
         name: {{ .Values.argo.artifactRepository.credentialsSecretName }}
-        key: accessKey
+        key: {{ .Values.argo.artifactRepository.credentialsSecretKeys.accessKey }}
       secretKeySecret:
         name: {{ .Values.argo.artifactRepository.credentialsSecretName }}
-        key: secretKey
+        key: {{ .Values.argo.artifactRepository.credentialsSecretKeys.secretKey }}

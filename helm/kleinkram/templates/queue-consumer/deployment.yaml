@@ -30,11 +30,8 @@ spec:
             - containerPort: {{ .Values.queueConsumer.port }}
           envFrom:
             - configMapRef: { name: kleinkram-config }
-            - secretRef: { name: {{ .Values.secretNames.db }} }
-            - secretRef: { name: {{ .Values.secretNames.s3 }} }
-            - secretRef: { name: {{ .Values.secretNames.jwt }} }
-            - secretRef: { name: {{ .Values.secretNames.googleOauth }} }
-            - secretRef: { name: {{ .Values.secretNames.githubOauth }} }
+          env:
+            {{- include "kleinkram.secretEnv" . | nindent 12 }}
           volumeMounts:
             - name: google-service-account
               mountPath: /app/secrets
@@ -53,3 +50,6 @@ spec:
         - name: google-service-account
           secret:
             secretName: {{ .Values.secretNames.googleServiceAccount }}
+            items:
+              - key: {{ .Values.secretKeys.googleServiceAccount }}
+                path: google-service-account.json

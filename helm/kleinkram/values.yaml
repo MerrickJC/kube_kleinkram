@@ -137,8 +137,7 @@ config:
 # this chart references Secret names in its Deployments, it does not create
 # the Secret objects or manage their contents
 secretNames:
-  # secrets are split to reduce the number of other secrets needed to rotate a secret
-  # and store the updated Secret resource
+  # secrets are split to reduce the number of values that need to rotate if a secret is compromised
   #
   # DB_USER, DB_PASSWORD
   db: kleinkram-db-credentials
@@ -150,8 +149,32 @@ secretNames:
   googleOauth: kleinkram-google-oauth-credentials
   # GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
   githubOauth: kleinkram-github-oauth-credentials
-  # Must use the key 'google-service-account.json' containing the service account JSON
+  # Must contain the service account JSON (in the key named in
+  # secretKeys.googleServiceAccount)
   googleServiceAccount: kleinkram-google-service-account
+
+# Keys inside the Secrets named above. Only change these if your existing
+# Secret objects use different key names than the ones below - the app itself
+# doesn't care what the Secret's keys are called, only what's in values here.
+secretKeys:
+  db:
+    user: DB_USER
+    password: DB_PASSWORD
+  s3:
+    accessKey: S3_ACCESS_KEY
+    secretKey: S3_SECRET_KEY
+    user: S3_USER
+    password: S3_PASSWORD
+  jwt:
+    secret: JWT_SECRET
+  googleOauth:
+    clientId: GOOGLE_CLIENT_ID
+    clientSecret: GOOGLE_CLIENT_SECRET
+  githubOauth:
+    clientId: GITHUB_CLIENT_ID
+    clientSecret: GITHUB_CLIENT_SECRET
+  # Key holding the service account JSON blob
+  googleServiceAccount: google-service-account.json
 
 # Generic networking.k8s.io/v1 Ingress. Disabled by default. If enabled,
 # set `className` to match the ingress controller or leave blank to use the
@@ -201,9 +224,12 @@ kueue:
 argo:
   artifactRepository:
     configMapName: kleinkram-artifact-repository
-    # Not created by this chart (see `secretNames` comment above) and must
-    # contain these keys: accessKey, secretKey
+    # Not created by this chart (see `secretNames` comment above)
     credentialsSecretName: kleinkram-artifact-repository-credentials
+    # Keys inside credentialsSecretName above
+    credentialsSecretKeys:
+      accessKey: accessKey
+      secretKey: secretKey
     key: artifactRepository
     # Plain HTTP by default since SeaweedFS is typically reached over a
     # cluster-internal Service without TLS. Set to false if using TLS
