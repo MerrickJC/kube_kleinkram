@@ -25,6 +25,23 @@ imagePullSecrets:
 {{- end -}}
 
 {{/*
+Merges .Values.commonAnnotations with a workload-specific annotations map
+with the workload-specific map winning on key collisions. Call with
+(dict "root" $ "local" .Values.<workload>.annotations). Renders nothing if
+the merged result is empty, so callers can safely wrap the result in `with`:
+  {{- with include "kleinkram.annotations" (dict "root" $ "local" .Values.apiServer.annotations) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+*/}}
+{{- define "kleinkram.annotations" -}}
+{{- $merged := merge (.local | default dict | deepCopy) (.root.Values.commonAnnotations | default dict) -}}
+{{- if $merged }}
+{{ toYaml $merged }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Env vars sourced from the db/s3/jwt/oauth Secrets, shared by api-server and
 queue-consumer. Secret names come from .Values.secretNames, key names come
 from .Values.secretKeys, so either can be overridden independently.

@@ -17,6 +17,11 @@ namespaces:
   app: kleinkram
   actions: kleinkram-actions
 
+# Annotations merged onto every Deployment this chart manages (and their Pod
+# templates). Per-workload `annotations`/`podAnnotations` below take
+# precedence over these on key collisions
+commonAnnotations: {}
+
 image:
   registry: registry.direct.merrickcampbell.au
   repository: kleinkram
@@ -54,6 +59,10 @@ apiServer:
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
   probePath: /api/health
+  # Extra annotations on the Deployment object itself, merged with commonAnnotations
+  annotations: {}
+  # Extra annotations on the Pod template (spec.template.metadata.annotations)
+  podAnnotations: {}
 
 # Runs `typeorm migration:run` as a Helm pre-install/pre-upgrade hook Job,
 # using the `migrator` image built from docker/backend.Dockerfile's
@@ -81,6 +90,10 @@ frontend:
     minReplicas: 1
     maxReplicas: 4
     targetCPUUtilizationPercentage: 70
+  # Extra annotations on the Deployment object itself, merged with commonAnnotations
+  annotations: {}
+  # Extra annotations on the Pod template (spec.template.metadata.annotations)
+  podAnnotations: {}
 
 documentation:
   replicaCount: 1
@@ -90,6 +103,10 @@ documentation:
   resources:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { cpu: 100m, memory: 128Mi }
+  # Extra annotations on the Deployment object itself, merged with commonAnnotations
+  annotations: {}
+  # Extra annotations on the Pod template (spec.template.metadata.annotations)
+  podAnnotations: {}
 
 # uses the kleinkram-action-operator ServiceAccount with namespaced RBAC
 # onto Workflow/Pod/Secret objects
@@ -110,6 +127,10 @@ queueConsumer:
   actionsNamespace: kleinkram-actions
   kueueLocalQueue: kleinkram-actions
   argoArtifactRepositoryConfigMap: kleinkram-artifact-repository
+  # Extra annotations on the Deployment object itself, merged with commonAnnotations
+  annotations: {}
+  # Extra annotations on the Pod template (spec.template.metadata.annotations)
+  podAnnotations: {}
 
 # This is the identity the Action containers themselves run as and has NO RBAC bindings. 
 # It mainly carries imagePullSecrets for Action images pulled from a private registry
