@@ -6,6 +6,10 @@ metadata:
   labels:
     {{- include "kleinkram.labels" . | nindent 4 }}
     app.kubernetes.io/component: queue-consumer
+  {{- with include "kleinkram.annotations" (dict "root" $ "local" .Values.queueConsumer.annotations) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ .Values.queueConsumer.replicaCount }}
   selector:
@@ -17,6 +21,10 @@ spec:
       labels:
         {{- include "kleinkram.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: queue-consumer
+      {{- with include "kleinkram.annotations" (dict "root" $ "local" .Values.queueConsumer.podAnnotations) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: {{ .Values.queueConsumer.serviceAccountName }}
       {{- if .Values.image.pullSecrets -}}

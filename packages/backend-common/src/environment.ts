@@ -169,6 +169,38 @@ export default {
         return asOptionalString('GITHUB_CLIENT_SECRET');
     },
 
+    /**
+     * @returns issuer URL of a generic OpenID Connect provider (e.g. Dex,
+     * Keycloak, Okta, Auth0). Its `.well-known/openid-configuration`
+     * discovery document is used to locate the authorization/token/userinfo
+     * endpoints, so no other endpoint URLs need to be configured.
+     */
+    get OIDC_ISSUER_URL(): string | undefined {
+        return asOptionalString('OIDC_ISSUER_URL');
+    },
+
+    get OIDC_CLIENT_ID(): string | undefined {
+        return asOptionalString('OIDC_CLIENT_ID');
+    },
+
+    get OIDC_CLIENT_SECRET(): string | undefined {
+        return asOptionalString('OIDC_CLIENT_SECRET');
+    },
+
+    /**
+     * @returns label shown on the frontend's OIDC login button
+     */
+    get OIDC_DISPLAY_NAME(): string {
+        return asOptionalString('OIDC_DISPLAY_NAME') ?? 'OIDC';
+    },
+
+    /**
+     * @returns space-separated OAuth2 scopes requested from the OIDC provider
+     */
+    get OIDC_SCOPE(): string {
+        return asOptionalString('OIDC_SCOPE') ?? 'openid profile email';
+    },
+
     get JWT_SECRET(): string {
         return asString('JWT_SECRET');
     },

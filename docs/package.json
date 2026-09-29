@@ -1,6 +1,6 @@
 {
     "name": "kleinkram-docs",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "license": "MIT",
     "target": "es2022",
     "scripts": {

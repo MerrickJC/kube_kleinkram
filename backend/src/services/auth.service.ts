@@ -180,6 +180,52 @@ export class AuthService implements OnModuleInit {
         );
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async validateAndCreateUserByOidc(profile: any): Promise<UserEntity> {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const { id, emails, displayName, username, _json } = profile;
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        const email: string | undefined = emails?.[0]?.value;
+        if (!email) {
+            throw new AuthFlowException(
+                'The OIDC provider did not return an email claim. Ensure the "email" scope is granted and the provider includes it in the userinfo response.',
+            );
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        const name: string = displayName || username || email;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        const picture: string = _json?.picture ?? '';
+
+        const account = await this.accountRepository.findOne({
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            where: { oauthID: id, provider: Providers.OIDC },
+            relations: {
+                user: true,
+            },
+        });
+
+        if (account !== null && account.user === undefined) {
+            logger.error('Account exists but has no linked user!');
+            throw new AuthFlowException(
+                'Account exists but has no linked user!',
+            );
+        }
+
+        if (account?.user !== undefined) {
+            return syncAffiliationAndReturn(
+                this.affiliationGroupService,
+                this.config,
+                account.user,
+                email,
+            );
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+        return this.create(id, Providers.OIDC, email, name, picture);
+    }
+
     login(user: UserEntity) {
         const payload: JwtPayload = {
             uuid: user.uuid,

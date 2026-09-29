@@ -35,6 +35,11 @@ export class AuthController {
             google: !!env.GOOGLE_CLIENT_ID && !!env.GOOGLE_CLIENT_SECRET,
             github: !!env.GITHUB_CLIENT_ID && !!env.GITHUB_CLIENT_SECRET,
             fakeOauth: env.VITE_USE_FAKE_OAUTH_FOR_DEVELOPMENT,
+            oidc:
+                !!env.OIDC_ISSUER_URL &&
+                !!env.OIDC_CLIENT_ID &&
+                !!env.OIDC_CLIENT_SECRET,
+            oidcDisplayName: env.OIDC_DISPLAY_NAME,
         };
     }
 
@@ -56,6 +61,13 @@ export class AuthController {
     @UseGuards(AuthGuard('google'))
     async googleAuth(): Promise<void> {
         // Initiates the Google OAuth flow
+        // OAuth is handled by the AuthGuard
+    }
+
+    @Get('oidc')
+    @UseGuards(AuthGuard(Providers.OIDC))
+    async oidcAuth(): Promise<void> {
+        // Initiates the generic OIDC flow
         // OAuth is handled by the AuthGuard
     }
 
@@ -91,6 +103,13 @@ export class AuthController {
     ): void {
         if (!env.VITE_USE_FAKE_OAUTH_FOR_DEVELOPMENT)
             throw new MethodNotAllowedException();
+        this.handleAuthRedirect(request, response);
+    }
+
+    @Get('oidc/callback')
+    @UseGuards(AuthGuard(Providers.OIDC))
+    @OutputDto(null)
+    oidcAuthRedirect(@Req() request: Request, @Res() response: Response): void {
         this.handleAuthRedirect(request, response);
     }
 

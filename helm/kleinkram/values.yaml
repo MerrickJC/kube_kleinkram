@@ -17,6 +17,11 @@ namespaces:
   app: kleinkram
   actions: kleinkram-actions
 
+# Annotations merged onto every Deployment this chart manages (and their Pod
+# templates). Per-workload `annotations`/`podAnnotations` below take
+# precedence over these on key collisions
+commonAnnotations: {}
+
 image:
   registry: registry.direct.merrickcampbell.au
   repository: kleinkram
@@ -54,6 +59,10 @@ apiServer:
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
   probePath: /api/health
+  # Extra annotations on the Deployment object itself, merged with commonAnnotations
+  annotations: {}
+  # Extra annotations on the Pod template (spec.template.metadata.annotations)
+  podAnnotations: {}
 
 # Runs `typeorm migration:run` as a Helm pre-install/pre-upgrade hook Job,
 # using the `migrator` image built from docker/backend.Dockerfile's
@@ -81,6 +90,10 @@ frontend:
     minReplicas: 1
     maxReplicas: 4
     targetCPUUtilizationPercentage: 70
+  # Extra annotations on the Deployment object itself, merged with commonAnnotations
+  annotations: {}
+  # Extra annotations on the Pod template (spec.template.metadata.annotations)
+  podAnnotations: {}
 
 documentation:
   replicaCount: 1
@@ -90,6 +103,10 @@ documentation:
   resources:
     requests: { cpu: 25m, memory: 64Mi }
     limits: { cpu: 100m, memory: 128Mi }
+  # Extra annotations on the Deployment object itself, merged with commonAnnotations
+  annotations: {}
+  # Extra annotations on the Pod template (spec.template.metadata.annotations)
+  podAnnotations: {}
 
 # uses the kleinkram-action-operator ServiceAccount with namespaced RBAC
 # onto Workflow/Pod/Secret objects
@@ -110,6 +127,10 @@ queueConsumer:
   actionsNamespace: kleinkram-actions
   kueueLocalQueue: kleinkram-actions
   argoArtifactRepositoryConfigMap: kleinkram-artifact-repository
+  # Extra annotations on the Deployment object itself, merged with commonAnnotations
+  annotations: {}
+  # Extra annotations on the Pod template (spec.template.metadata.annotations)
+  podAnnotations: {}
 
 # This is the identity the Action containers themselves run as and has NO RBAC bindings. 
 # It mainly carries imagePullSecrets for Action images pulled from a private registry
@@ -152,6 +173,17 @@ config:
   # Defaults to a bare `seaweedfs` hostname. Set this if `s3Endpoint` is a
   # differs from the in-cluster Service address
   s3EndpointInternal: ''
+  # Generic OpenID Connect login provider (e.g. Dex, Keycloak, Okta, Auth0).
+  # Leave blank to disable. secretNames.oidcOauth must be set with 
+  # OIDC_CLIENT_ID/OIDC_CLIENT_SECRET for the "oidc" login button to appear.
+  # Only the issuer needs to be set, its `.well-known/openid-configuration`
+  # document is used to discover the authorization/token/userinfo endpoints.
+  oidcIssuerUrl: ''
+  # Label shown on the frontend's OIDC login button, e.g. 'Dex' or 'Company SSO'
+  oidcDisplayName: 'OIDC'
+  # Space-separated OAuth2 scopes requested from the OIDC provider. 'openid'
+  # is always requested even if omitted here.
+  oidcScope: 'openid profile email'
 
 # this chart references Secret names in its Deployments, it does not create
 # the Secret objects or manage their contents
@@ -168,6 +200,9 @@ secretNames:
   googleOauth: kleinkram-google-oauth-credentials
   # GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
   githubOauth: kleinkram-github-oauth-credentials
+  # OIDC_CLIENT_ID, OIDC_CLIENT_SECRET. Leave blank to disable the generic
+  # OIDC login provider entirely
+  oidcOauth: ''
   # Must contain the service account JSON (in the key named in
   # secretKeys.googleServiceAccount)
   googleServiceAccount: kleinkram-google-service-account
@@ -192,6 +227,9 @@ secretKeys:
   githubOauth:
     clientId: GITHUB_CLIENT_ID
     clientSecret: GITHUB_CLIENT_SECRET
+  oidcOauth:
+    clientId: OIDC_CLIENT_ID
+    clientSecret: OIDC_CLIENT_SECRET
   # Key holding the service account JSON blob
   googleServiceAccount: google-service-account.json
 

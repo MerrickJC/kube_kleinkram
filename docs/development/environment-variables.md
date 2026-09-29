@@ -68,6 +68,11 @@ Configuration for the PostgreSQL database.
 | `GOOGLE_CLIENT_SECRET`                | Google OAuth Client Secret.                                    | -                             |
 | `GITHUB_CLIENT_ID`                    | GitHub OAuth Client ID.                                        | -                             |
 | `GITHUB_CLIENT_SECRET`                | GitHub OAuth Client Secret.                                    | -                             |
+| `OIDC_ISSUER_URL`                     | Issuer URL of a generic OpenID Connect provider (e.g. Dex, Keycloak, Okta, Auth0). Its `.well-known/openid-configuration` document is used to discover the authorization/token/userinfo endpoints - no other OIDC URLs need to be set. Leave unset to disable. | -                             |
+| `OIDC_CLIENT_ID`                      | OIDC Client ID.                                                | -                             |
+| `OIDC_CLIENT_SECRET`                  | OIDC Client Secret.                                            | -                             |
+| `OIDC_DISPLAY_NAME`                   | Label shown on the frontend's OIDC login button.               | `OIDC`                        |
+| `OIDC_SCOPE`                          | Space-separated OAuth2 scopes requested from the OIDC provider. `openid` is always requested even if omitted here. | `openid profile email`        |
 | `JWT_SECRET`                          | Secret key used to sign and verify JWT tokens.                 | `SECRET`                      |
 
 ## Docker & Registry Configuration

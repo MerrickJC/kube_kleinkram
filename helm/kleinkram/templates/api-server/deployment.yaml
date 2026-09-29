@@ -6,6 +6,10 @@ metadata:
   labels:
     {{- include "kleinkram.labels" . | nindent 4 }}
     app.kubernetes.io/component: api-server
+  {{- with include "kleinkram.annotations" (dict "root" $ "local" .Values.apiServer.annotations) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ .Values.apiServer.replicaCount }}
   selector:
@@ -17,6 +21,10 @@ spec:
       labels:
         {{- include "kleinkram.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api-server
+      {{- with include "kleinkram.annotations" (dict "root" $ "local" .Values.apiServer.podAnnotations) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       {{- if .Values.image.pullSecrets -}}
       {{- include "kleinkram.imagePullSecrets" .Values.image.pullSecrets | nindent 6 }}
