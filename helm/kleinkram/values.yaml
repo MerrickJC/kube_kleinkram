@@ -146,6 +146,12 @@ config:
   redisPort: 6379
   dockerHubNamespace: rslethz
   vitePublicOauthFake: 'false'
+  # Cluster-internal SeaweedFS S3 endpoint used by the backend's own S3/STS
+  # calls (as opposed to `s3Endpoint`, which is also used to build presigned
+  # URLs handed to browsers/the CLI and so must stay externally reachable).
+  # Defaults to a bare `seaweedfs` hostname. Set this if `s3Endpoint` is a
+  # differs from the in-cluster Service address
+  s3EndpointInternal: ''
 
 # this chart references Secret names in its Deployments, it does not create
 # the Secret objects or manage their contents
@@ -265,6 +271,8 @@ networkPolicy:
   # the cluster, replace this with the correct egress CIDR. This placeholder
   # is an example only
   seaweedfsCidr: 10.0.0.0/8
+  # Must match the port in config.s3Endpoint
+  seaweedfsPort: 9000
   dnsNamespace: kube-system
 
 # Observability stack is NOT deployed by this chart (see DESIGN.md in this

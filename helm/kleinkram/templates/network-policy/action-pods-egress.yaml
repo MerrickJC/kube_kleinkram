@@ -38,5 +38,5 @@ spec:
         - ipBlock:
             cidr: {{ .Values.networkPolicy.seaweedfsCidr }}
       ports:
-        - { protocol: TCP, port: 9000 }
+        - { protocol: TCP, port: {{ .Values.networkPolicy.seaweedfsPort }} }
 {{- end }}

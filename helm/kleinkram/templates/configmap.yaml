@@ -17,11 +17,15 @@ data:
   DB_PORT: {{ .Values.config.dbPort | quote }}
   DB_DATABASE: {{ .Values.config.dbDatabase | quote }}
   REDIS_HOST: {{ if .Values.redis.enabled }}kleinkram-redis{{ else }}{{ .Values.config.redisHost }}{{ end }}
-  REDIS_PORT: {{ .Values.config.redisPort | quote }}
+  # The bundled Redis always listens on the standard 6379 port, so force it here the same way
+  # REDIS_HOST is forced above. config.redisPort only applies when pointing at an externally-managed
+  # Redis (redis.enabled: false)
+  REDIS_PORT: {{ if .Values.redis.enabled }}'6379'{{ else }}{{ .Values.config.redisPort | quote }}{{ end }}
   VITE_DOCKER_HUB_NAMESPACE: {{ .Values.config.dockerHubNamespace | quote }}
   DEV: 'false'
   SEED: 'false'
   DEVBUILD: 'false'
+  VITE_USE_FAKE_OAUTH_FOR_DEVELOPMENT: {{ .Values.config.vitePublicOauthFake | quote }}
   GOOGLE_KEY_FILE: /app/secrets/google-service-account.json
   # Kubernetes/Argo/Kueue integration. Defaults match the code's fallbacks.
   # Set explicitly here for operability/clarity.
@@ -31,4 +35,7 @@ data:
   ACTION_POD_SERVICE_ACCOUNT: {{ .Values.actions.serviceAccountName | quote }}
   {{- if .Values.observability.prometheusUrl }}
   PROMETHEUS_URL: {{ .Values.observability.prometheusUrl | quote }}
+  {{- end }}
+  {{- if .Values.config.s3EndpointInternal }}
+  S3_ENDPOINT_INTERNAL: {{ .Values.config.s3EndpointInternal | quote }}
   {{- end }}
