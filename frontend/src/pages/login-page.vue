@@ -81,6 +81,16 @@
                             label="Login with GitHub"
                             @click="loginWithGitHub"
                         />
+
+                        <q-btn
+                            v-if="availableProviders?.oidc"
+                            class="button-border full-width q-mt-md login-button"
+                            flat
+                            outline
+                            size="md"
+                            :label="`Login with ${availableProviders.oidcDisplayName}`"
+                            @click="loginWithOidc"
+                        />
                     </template>
 
                     <div v-if="$route.query.error_msg" class="q-mt-lg">
@@ -133,7 +143,8 @@ const noProvidersAvailable = computed(() => {
     return (
         !availableProviders.value.google &&
         !availableProviders.value.github &&
-        !availableProviders.value.fakeOauth
+        !availableProviders.value.fakeOauth &&
+        !availableProviders.value.oidc
     );
 });
 
@@ -146,6 +157,10 @@ const loginWithGitHub = (): void => {
 
 const loginWithFakeOAuth = (): void => {
     login('fake-oauth');
+};
+
+const loginWithOidc = (): void => {
+    login('oidc');
 };
 
 watch(

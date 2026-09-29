@@ -52,4 +52,10 @@ from .Values.secretKeys, so either can be overridden independently.
   valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.githubOauth }}, key: {{ .Values.secretKeys.githubOauth.clientId }} } }
 - name: GITHUB_CLIENT_SECRET
   valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.githubOauth }}, key: {{ .Values.secretKeys.githubOauth.clientSecret }} } }
+{{- if .Values.secretNames.oidcOauth }}
+- name: OIDC_CLIENT_ID
+  valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.oidcOauth }}, key: {{ .Values.secretKeys.oidcOauth.clientId }} } }
+- name: OIDC_CLIENT_SECRET
+  valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.oidcOauth }}, key: {{ .Values.secretKeys.oidcOauth.clientSecret }} } }
+{{- end -}}
 {{- end -}}

@@ -124,6 +124,7 @@ export enum Providers {
     GOOGLE = 'google',
     GITHUB = 'github',
     FakeOAuth = 'fake-oauth', // for local dev only
+    OIDC = 'oidc', // generic OpenID Connect provider (e.g. Dex, Keycloak, Okta, Auth0)
 }
 
 export enum DataType {

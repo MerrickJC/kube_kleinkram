@@ -29,6 +29,7 @@ import { AuthGuardService } from './auth-guard.service';
 import { FakeOauthStrategy } from './fake-oauth.strategy';
 import { GitHubStrategy } from './github.strategy';
 import { MissionGuardService } from './mission-guard.service';
+import { discoverOidcEndpoints, OidcStrategy } from './oidc.strategy';
 
 @Global()
 @Module({
@@ -61,6 +62,14 @@ import { MissionGuardService } from './mission-guard.service';
         GoogleStrategy,
         GitHubStrategy,
         FakeOauthStrategy,
+        {
+            provide: OidcStrategy,
+            useFactory: async (authService: AuthService) => {
+                const endpoints = await discoverOidcEndpoints();
+                return new OidcStrategy(authService, endpoints);
+            },
+            inject: [AuthService],
+        },
         ProjectGuardService,
         MissionGuardService,
         AuthGuardService,

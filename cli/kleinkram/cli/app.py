@@ -127,7 +127,7 @@ def login(
         "auto",
         "--oauth-provider",
         "-p",
-        help="OAuth provider to use for login. Supported providers: google, github, fake-oauth.",
+        help="OAuth provider to use for login. Supported providers: google, github, fake-oauth, oidc.",
         show_default=True,
     ),
     key: Optional[str] = typer.Option(None, help="CLI key"),
@@ -149,9 +149,9 @@ def login(
             oAuthProvider = "google"
 
     # validate oAuthProvider
-    if oAuthProvider not in ["google", "github", "fake-oauth"]:
+    if oAuthProvider not in ["google", "github", "fake-oauth", "oidc"]:
         raise typer.BadParameter(
-            f"Unsupported OAuth provider '{oAuthProvider}'. Supported providers: google, github, fake-oauth."
+            f"Unsupported OAuth provider '{oAuthProvider}'. Supported providers: google, github, fake-oauth, oidc."
         )
 
     # validate that user parameter is only used with fake-oauth

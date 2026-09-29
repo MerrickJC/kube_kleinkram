@@ -27,6 +27,11 @@ data:
   DEVBUILD: 'false'
   VITE_USE_FAKE_OAUTH_FOR_DEVELOPMENT: {{ .Values.config.vitePublicOauthFake | quote }}
   GOOGLE_KEY_FILE: /app/secrets/google-service-account.json
+  {{- if .Values.config.oidcIssuerUrl }}
+  OIDC_ISSUER_URL: {{ .Values.config.oidcIssuerUrl | quote }}
+  OIDC_DISPLAY_NAME: {{ .Values.config.oidcDisplayName | quote }}
+  OIDC_SCOPE: {{ .Values.config.oidcScope | quote }}
+  {{- end }}
   # Kubernetes/Argo/Kueue integration. Defaults match the code's fallbacks.
   # Set explicitly here for operability/clarity.
   KUBE_NAMESPACE_ACTIONS: {{ .Values.queueConsumer.actionsNamespace | quote }}
