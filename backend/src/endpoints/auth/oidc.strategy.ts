@@ -6,6 +6,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import e from 'express';
 import OpenIDConnectStrategy, { VerifyCallback } from 'passport-openidconnect';
 import logger from '../../logger';
+import { StatelessOidcStateStore } from './oidc-state-store';
 
 export interface OidcEndpoints {
     issuer: string;
@@ -40,6 +41,13 @@ export async function discoverOidcEndpoints(): Promise<OidcEndpoints> {
         !env.OIDC_CLIENT_ID ||
         !env.OIDC_CLIENT_SECRET
     ) {
+        return UNCONFIGURED_OIDC_ENDPOINTS;
+    }
+
+    if (!/^https?:\/\//.test(env.OIDC_ISSUER_URL)) {
+        logger.error(
+            `OIDC_ISSUER_URL ("${env.OIDC_ISSUER_URL}") is missing a scheme (http:// or https://). The "oidc" login provider will be unavailable until this is fixed.`,
+        );
         return UNCONFIGURED_OIDC_ENDPOINTS;
     }
 
@@ -94,6 +102,8 @@ export class OidcStrategy extends PassportStrategy(
             // OIDC requires the 'openid' scope; ensure it's always present
             // even if an operator's OIDC_SCOPE override omits it.
             scope: [...new Set(['openid', ...requestedScopes])],
+            // See oidc-state-store.ts for details
+            store: new StatelessOidcStateStore(),
         });
     }
 
