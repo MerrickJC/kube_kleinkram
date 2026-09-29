@@ -7,7 +7,10 @@ export class UpdateSystemUserUuid1769000000000 implements MigrationInterface {
         const oldUuid = '10000000-0000-0000-0000-000000000000';
         const newUuid = '00000000-0000-4000-8000-000000000000';
 
-        await queryRunner.query(`SET session_replication_role = 'replica'`);
+        // `SET session_replication_role` requires Postgres superuser. Disabling
+        // triggers on "user" (via ALTER TABLE, which only requires table
+        // ownership) has the same effect for this update
+        await queryRunner.query(`ALTER TABLE "user" DISABLE TRIGGER ALL`);
 
         try {
             // Update User table
@@ -34,7 +37,7 @@ export class UpdateSystemUserUuid1769000000000 implements MigrationInterface {
                 );
             }
         } finally {
-            await queryRunner.query(`SET session_replication_role = 'origin'`);
+            await queryRunner.query(`ALTER TABLE "user" ENABLE TRIGGER ALL`);
         }
     }
 
@@ -42,7 +45,7 @@ export class UpdateSystemUserUuid1769000000000 implements MigrationInterface {
         const oldUuid = '10000000-0000-0000-0000-000000000000';
         const newUuid = '00000000-0000-4000-8000-000000000000';
 
-        await queryRunner.query(`SET session_replication_role = 'replica'`);
+        await queryRunner.query(`ALTER TABLE "user" DISABLE TRIGGER ALL`);
 
         try {
             const tables = [
@@ -67,7 +70,7 @@ export class UpdateSystemUserUuid1769000000000 implements MigrationInterface {
                 `UPDATE "user" SET "uuid" = '${oldUuid}' WHERE "uuid" = '${newUuid}'`,
             );
         } finally {
-            await queryRunner.query(`SET session_replication_role = 'origin'`);
+            await queryRunner.query(`ALTER TABLE "user" ENABLE TRIGGER ALL`);
         }
     }
 }
