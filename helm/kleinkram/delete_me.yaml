@@ -1,0 +1,857 @@
+---
+# Source: kleinkram/templates/namespaces.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+
+---
+# Source: kleinkram/templates/namespaces.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  # Separate from the app namespace so RBAC, NetworkPolicy, and the image
+  # allow-list policy can scope tightly to only user-supplied Action
+  # containers, never the trusted app services.
+  name: kleinkram-actions
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+
+---
+# Source: kleinkram/templates/network-policy/action-pods-egress.yaml
+# Default-deny egress from Action pods except DNS, the api-server Service,
+# and the SeaweedFS S3 endpoint
+#
+# LIMITATION: standard NetworkPolicy can't match by external hostname, only
+# label/namespace selectors or CIDRs. `networkPolicy.seaweedfsCidr` assumes
+# SeaweedFS is reachable via a cluster-internal Service/CIDR range. If
+# SeaweedFS is external to the cluster, it will not be reachable as it is 
+# currently configured, so it will need to be adjusted
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kleinkram-action-egress
+  namespace: kleinkram-actions
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+spec:
+  podSelector: {}
+  policyTypes: ['Egress']
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kleinkram
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: api-server
+      ports:
+        - { protocol: TCP, port: 3000 }
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - { protocol: TCP, port: 9000 }
+
+---
+# Source: kleinkram/templates/rbac/action-operator-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kleinkram-action-operator
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+
+---
+# Source: kleinkram/templates/rbac/action-pod-serviceaccount.yaml
+# Identity for the Action containers Argo runs. Deliberately has no
+# RBAC bindings. The ServiceAccount only exists to carry imagePullSecrets
+# for Action images pulled from a private registry.
+# automountServiceAccountToken is disabled so a Kubernetes API
+# token is never mounted into a user-supplied container
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kleinkram-action-pod
+  namespace: kleinkram-actions
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+automountServiceAccountToken: false
+
+---
+# Source: kleinkram/templates/argo/artifact-repository-configmap.yaml
+# Points Argo's built-in artifact upload at the already-installed SeaweedFS
+# bucket which Kleinkram writes artifacts to
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kleinkram-artifact-repository
+  namespace: kleinkram-actions
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+data:
+  artifactRepository: |
+    s3:
+      bucket: action-artifacts
+      endpoint: "seaweedfs.default.svc:9000"
+      insecure: true
+      accessKeySecret:
+        name: kleinkram-artifact-repository-credentials
+        key: accessKey
+      secretKeySecret:
+        name: kleinkram-artifact-repository-credentials
+        key: secretKey
+
+---
+# Source: kleinkram/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kleinkram-config
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+data:
+  FRONTEND_URL: "https://kleinkram.example.com"
+  DOCS_URL: "https://docs.kleinkram.example.com"
+  BACKEND_URL: "https://api.kleinkram.example.com"
+  S3_ENDPOINT: "http://seaweedfs.default.svc:9000"
+  S3_DATA_BUCKET_NAME: "kleinkram-data"
+  S3_DB_BUCKET_NAME: "kleinkram-dbbackup"
+  S3_ARTIFACTS_BUCKET_NAME: "action-artifacts"
+  DB_HOST: "postgres.default.svc"
+  DB_PORT: "5432"
+  DB_DATABASE: "kleinkram"
+  REDIS_HOST: kleinkram-redis
+  REDIS_PORT: "6379"
+  VITE_DOCKER_HUB_NAMESPACE: "rslethz"
+  DEV: 'false'
+  SEED: 'false'
+  DEVBUILD: 'false'
+  GOOGLE_KEY_FILE: /app/secrets/google-service-account.json
+  # Kubernetes/Argo/Kueue integration. Defaults match the code's fallbacks.
+  # Set explicitly here for operability/clarity.
+  KUBE_NAMESPACE_ACTIONS: "kleinkram-actions"
+  KUEUE_LOCAL_QUEUE: "kleinkram-actions"
+  ARGO_ARTIFACT_REPOSITORY_CONFIGMAP: "kleinkram-artifact-repository"
+  ACTION_POD_SERVICE_ACCOUNT: "kleinkram-action-pod"
+  PROMETHEUS_URL: "http://prometheus.observability.svc:9090"
+
+---
+# Source: kleinkram/templates/rbac/action-operator-clusterrole.yaml
+# A ClusterRole (so it can be reused/versioned once), which is only ever
+# bound to the namespaced kleinkram-action-operator RoleBinding. Provides
+# a least-privilege grant onto exactly the objects the Action Operator needs
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kleinkram-action-operator
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+rules:
+  - apiGroups: ['argoproj.io']
+    resources: ['workflows']
+    verbs: ['create', 'get', 'list', 'watch', 'delete', 'patch']
+  - apiGroups: ['']
+    resources: ['pods']
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['']
+    resources: ['secrets']
+    verbs: ['create', 'get', 'delete']
+
+---
+# Source: kleinkram/templates/rbac/action-operator-rolebinding.yaml
+# This scopes the reusable kleinkram-action-operator ClusterRole's permissions to
+# just the kleinkram-actions namespace, for the ServiceAccount that lives in
+# the kleinkram (app) namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kleinkram-action-operator
+  namespace: kleinkram-actions
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+subjects:
+  - kind: ServiceAccount
+    name: kleinkram-action-operator
+    namespace: kleinkram
+roleRef:
+  kind: ClusterRole
+  name: kleinkram-action-operator
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Source: kleinkram/templates/api-server/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kleinkram-api-server
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: api-server
+spec:
+  selector:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/component: api-server
+  ports:
+    - port: 3000
+      targetPort: 3000
+
+---
+# Source: kleinkram/templates/documentation/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kleinkram-documentation
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: documentation
+spec:
+  selector:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/component: documentation
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# Source: kleinkram/templates/frontend/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kleinkram-frontend
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: frontend
+spec:
+  selector:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/component: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# Source: kleinkram/templates/redis/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kleinkram-redis
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: redis
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/component: redis
+  ports:
+    - port: 6379
+
+---
+# Source: kleinkram/templates/api-server/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleinkram-api-server
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: api-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kleinkram
+      app.kubernetes.io/instance: kleinkram
+      app.kubernetes.io/component: api-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kleinkram
+        app.kubernetes.io/instance: kleinkram
+        app.kubernetes.io/component: api-server
+    spec:
+      containers:
+        - name: api-server
+          image: registry.direct.merrickcampbell.au/kleinkram:api-server-1.0.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef: { name: kleinkram-config }
+          env:
+            - name: SERVER_PORT
+              value: "3000"
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: kleinkram-db-credentials, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: kleinkram-db-credentials, key: DB_PASSWORD } }
+            - name: S3_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: kleinkram-s3-credentials, key: S3_ACCESS_KEY } }
+            - name: S3_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: kleinkram-s3-credentials, key: S3_SECRET_KEY } }
+            - name: S3_USER
+              valueFrom: { secretKeyRef: { name: kleinkram-s3-credentials, key: S3_USER } }
+            - name: S3_PASSWORD
+              valueFrom: { secretKeyRef: { name: kleinkram-s3-credentials, key: S3_PASSWORD } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: kleinkram-jwt-secret, key: JWT_SECRET } }
+            - name: GOOGLE_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: kleinkram-google-oauth-credentials, key: GOOGLE_CLIENT_ID } }
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: kleinkram-google-oauth-credentials, key: GOOGLE_CLIENT_SECRET } }
+            - name: GITHUB_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: kleinkram-github-oauth-credentials, key: GITHUB_CLIENT_ID } }
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: kleinkram-github-oauth-credentials, key: GITHUB_CLIENT_SECRET } }
+          volumeMounts:
+            - name: google-service-account
+              mountPath: /app/secrets
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+      volumes:
+        - name: google-service-account
+          secret:
+            secretName: kleinkram-google-service-account
+            items:
+              - key: google-service-account.json
+                path: google-service-account.json
+
+---
+# Source: kleinkram/templates/documentation/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleinkram-documentation
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: documentation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kleinkram
+      app.kubernetes.io/instance: kleinkram
+      app.kubernetes.io/component: documentation
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kleinkram
+        app.kubernetes.io/instance: kleinkram
+        app.kubernetes.io/component: documentation
+    spec:
+      containers:
+        - name: documentation
+          image: registry.direct.merrickcampbell.au/kleinkram:docs-1.0.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+            requests:
+              cpu: 25m
+              memory: 64Mi
+
+---
+# Source: kleinkram/templates/frontend/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleinkram-frontend
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kleinkram
+      app.kubernetes.io/instance: kleinkram
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kleinkram
+        app.kubernetes.io/instance: kleinkram
+        app.kubernetes.io/component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: registry.direct.merrickcampbell.au/kleinkram:frontend-1.0.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          # No env vars: BACKEND_URL/VITE_S3_ENDPOINT/etc. are baked into the
+          # static bundle at image build time, not read at container runtime.
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            limits:
+              cpu: 250m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+
+---
+# Source: kleinkram/templates/queue-consumer/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleinkram-queue-consumer
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: queue-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kleinkram
+      app.kubernetes.io/instance: kleinkram
+      app.kubernetes.io/component: queue-consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kleinkram
+        app.kubernetes.io/instance: kleinkram
+        app.kubernetes.io/component: queue-consumer
+    spec:
+      serviceAccountName: kleinkram-action-operator
+      containers:
+        - name: queue-consumer
+          image: registry.direct.merrickcampbell.au/kleinkram:queue-consumer-1.0.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef: { name: kleinkram-config }
+          env:
+            - name: SERVER_PORT
+              value: "3000"
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: kleinkram-db-credentials, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: kleinkram-db-credentials, key: DB_PASSWORD } }
+            - name: S3_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: kleinkram-s3-credentials, key: S3_ACCESS_KEY } }
+            - name: S3_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: kleinkram-s3-credentials, key: S3_SECRET_KEY } }
+            - name: S3_USER
+              valueFrom: { secretKeyRef: { name: kleinkram-s3-credentials, key: S3_USER } }
+            - name: S3_PASSWORD
+              valueFrom: { secretKeyRef: { name: kleinkram-s3-credentials, key: S3_PASSWORD } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: kleinkram-jwt-secret, key: JWT_SECRET } }
+            - name: GOOGLE_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: kleinkram-google-oauth-credentials, key: GOOGLE_CLIENT_ID } }
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: kleinkram-google-oauth-credentials, key: GOOGLE_CLIENT_SECRET } }
+            - name: GITHUB_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: kleinkram-github-oauth-credentials, key: GITHUB_CLIENT_ID } }
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: kleinkram-github-oauth-credentials, key: GITHUB_CLIENT_SECRET } }
+          volumeMounts:
+            - name: google-service-account
+              mountPath: /app/secrets
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /health, port: 3000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+      volumes:
+        - name: google-service-account
+          secret:
+            secretName: kleinkram-google-service-account
+            items:
+              - key: google-service-account.json
+                path: google-service-account.json
+
+---
+# Source: kleinkram/templates/api-server/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kleinkram-api-server
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kleinkram-api-server
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+---
+# Source: kleinkram/templates/frontend/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kleinkram-frontend
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kleinkram-frontend
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+---
+# Source: kleinkram/templates/queue-consumer/hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kleinkram-queue-consumer
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kleinkram-queue-consumer
+  minReplicas: 1
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+---
+# Source: kleinkram/templates/redis/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kleinkram-redis
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: redis
+spec:
+  serviceName: kleinkram-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kleinkram
+      app.kubernetes.io/instance: kleinkram
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kleinkram
+        app.kubernetes.io/instance: kleinkram
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:latest
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            limits:
+              cpu: 250m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']    # TODO: make it 'ReadWriteOncePod' instead
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi
+
+---
+# Source: kleinkram/templates/kueue/cluster-queue.yaml
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: kleinkram-cluster-queue
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+spec:
+  namespaceSelector: {}
+  resourceGroups:
+    - coveredResources: ['cpu', 'memory']
+      flavors:
+        - name: cpu-default
+          resources:
+            - name: 'cpu'
+              nominalQuota: "16"
+            - name: 'memory'
+              nominalQuota: "64Gi"
+    - coveredResources: ['nvidia.com/gpu']
+      flavors:
+        - name: gpu-default
+          resources:
+            - name: 'nvidia.com/gpu'
+              nominalQuota: "2"
+
+---
+# Source: kleinkram/templates/kueue/local-queue.yaml
+# One shared LocalQueue for all projects    TODO: one LocalQueue per project
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: kleinkram-actions
+  namespace: kleinkram-actions
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+spec:
+  clusterQueue: kleinkram-cluster-queue
+
+---
+# Source: kleinkram/templates/kueue/resource-flavor-cpu.yaml
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: cpu-default
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+spec:
+
+---
+# Source: kleinkram/templates/kueue/resource-flavor-gpu.yaml
+# PLACEHOLDER nodeSelector/tolerations -- see values.yaml's kueue.resourceFlavors.gpu
+# comment. Must match the cluster's real GPU node pool labels/taints; the
+# NVIDIA device plugin DaemonSet must already be running there (K3s does not
+# install it, and this chart does not either).
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: gpu-default
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+spec:
+  nodeLabels:
+    gpu: "true"
+  tolerations:
+    - effect: NoSchedule
+      key: nvidia.com/gpu
+      operator: Exists
+
+---
+# Source: kleinkram/templates/kueue/workload-priority-class.yaml
+# NOTE: nothing in workflow-dispatch.service.ts currently sets a
+# priorityClassName on submitted Workflows, these are here for
+# future extension
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: WorkloadPriorityClass
+metadata:
+  name: kleinkram-interactive
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+value: 1000
+description: Manual/WEBHOOK-triggered Actions -- a human is waiting on this.
+
+---
+# Source: kleinkram/templates/kueue/workload-priority-class.yaml
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: WorkloadPriorityClass
+metadata:
+  name: kleinkram-scheduled
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+value: 100
+description: TIME/FILE-triggered Actions -- background/batch work.
+---
+# Source: kleinkram/templates/db-migrate/job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kleinkram-db-migrate
+  namespace: kleinkram
+  labels:
+    app.kubernetes.io/name: kleinkram
+    app.kubernetes.io/instance: kleinkram
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: db-migrate
+  annotations:
+    # Runs before the api-server/queue-consumer Deployments are created or
+    # updated. before-hook-creation clears out a stuck Job from a previous
+    # (failed) release so this hook doesn't collide with it on retry.
+    'helm.sh/hook': pre-install,pre-upgrade
+    'helm.sh/hook-weight': '0'
+    'helm.sh/hook-delete-policy': before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kleinkram
+        app.kubernetes.io/instance: kleinkram
+        app.kubernetes.io/component: db-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: db-migrate
+          image: registry.direct.merrickcampbell.au/kleinkram:migrator-1.0.4
+          imagePullPolicy: IfNotPresent
+          env:
+            # Names match backend/migration/prod/production-datasource.config.ts,
+            # which is the same TypeORM CLI config used for manual migrations
+            # (see docs/development/migrations/migrations.md)
+            - name: prod_dbhost
+              value: "postgres.default.svc"
+            - name: prod_port
+              value: "5432"
+            - name: prod_dbname
+              value: "kleinkram"
+            - name: prod_ssl
+              value: "false"
+            - name: prod_dbuser
+              valueFrom: { secretKeyRef: { name: kleinkram-db-credentials, key: DB_USER } }
+            - name: prod_dbpassword
+              valueFrom: { secretKeyRef: { name: kleinkram-db-credentials, key: DB_PASSWORD } }
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+
