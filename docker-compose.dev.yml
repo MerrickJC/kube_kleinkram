@@ -62,6 +62,30 @@ services:
         depends_on:
             - database
 
+    # Not started by `docker compose up` (see profiles). Built so CI can push
+    # it for the Helm db-dump CronJob. You can run manually with
+    # `docker compose --profile tools run --rm db-dumper`
+    db-dumper:
+        image: registry.direct.merrickcampbell.au/kleinkram:db-dumper-dev
+        container_name: kleinkram-db-dumper-dev
+        profiles: ['tools']
+
+        build:
+            context: .
+            dockerfile: docker/backend.Dockerfile
+            target: db-dumper
+
+        env_file:
+            - .env
+        environment:
+            DB_HOST: database
+
+        networks:
+            - privatenet
+
+        depends_on:
+            - database
+
     database:
         image: postgres:17
         container_name: kleinkram-postgres-dev

@@ -29,7 +29,6 @@ import { UserModule } from './endpoints/user/user.module';
 import { APIKeyResolverMiddleware } from './routing/middlewares/api-key-resolver-middleware.service';
 import { AuditLoggerMiddleware } from './routing/middlewares/audit-logger-middleware.service';
 import { VersionCheckerMiddlewareService } from './routing/middlewares/version-checker-middleware.service';
-import { DBDumper } from './services/dbdumper.service';
 
 @Module({
     imports: [
@@ -88,7 +87,6 @@ import { DBDumper } from './services/dbdumper.service';
         ScheduleModule.forRoot(),
         StorageModule,
     ],
-    providers: [DBDumper],
 })
 export class AppModule implements NestModule {
     /**

@@ -1,0 +1,55 @@
+{{- if .Values.dbDump.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kleinkram-db-dump
+  namespace: {{ .Values.namespaces.app }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-dump
+spec:
+  schedule: {{ .Values.dbDump.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.dbDump.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "kleinkram.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: db-dump
+        spec:
+          restartPolicy: Never
+          {{- if .Values.image.pullSecrets }}
+          {{- include "kleinkram.imagePullSecrets" .Values.image.pullSecrets | nindent 10 }}
+          {{- end }}
+          containers:
+            - name: db-dump
+              image: {{ include "kleinkram.image" (dict "root" $ "service" "db-dumper") }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              env:
+                - name: DB_HOST
+                  value: {{ .Values.config.dbHost | quote }}
+                - name: DB_PORT
+                  value: {{ .Values.config.dbPort | quote }}
+                - name: DB_DATABASE
+                  value: {{ .Values.config.dbDatabase | quote }}
+                - name: DB_USER
+                  valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.dbDump }}, key: {{ .Values.secretKeys.dbDump.user }} } }
+                - name: DB_PASSWORD
+                  valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.dbDump }}, key: {{ .Values.secretKeys.dbDump.password }} } }
+                - name: S3_ENDPOINT
+                  value: {{ .Values.config.s3Endpoint | quote }}
+                {{- if .Values.config.s3EndpointInternal }}
+                - name: S3_ENDPOINT_INTERNAL
+                  value: {{ .Values.config.s3EndpointInternal | quote }}
+                {{- end }}
+                - name: S3_DB_BUCKET_NAME
+                  value: {{ .Values.config.s3DbBucketName | quote }}
+                - name: S3_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.s3 }}, key: {{ .Values.secretKeys.s3.accessKey }} } }
+                - name: S3_SECRET_KEY
+                  valueFrom: { secretKeyRef: { name: {{ .Values.secretNames.s3 }}, key: {{ .Values.secretKeys.s3.secretKey }} } }
+              resources:
+                {{- toYaml .Values.dbDump.resources | nindent 16 }}
+{{- end }}
