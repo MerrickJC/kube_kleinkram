@@ -29,6 +29,9 @@ RUN pnpm --filter @kleinkram/validation build
 RUN pnpm --filter @kleinkram/api-dto build
 RUN pnpm --filter @kleinkram/backend-common build
 RUN NODE_ENV=production pnpm --filter kleinkram-backend build
+# Standalone entry point for the db-dumper CronJob image below. Compiled with
+# plain tsc since it has no @kleinkram/* or Nest dependencies
+RUN pnpm --filter kleinkram-backend build:db-dump
 
 # Reuses the full monorepo checkout from `build` (source + devDependencies)
 # so the TypeORM CLI can resolve migrations/entities directly from
@@ -60,3 +63,28 @@ COPY --from=deploy /prod/backend/node_modules ./backend/node_modules
 WORKDIR /app/backend
 
 CMD ["dist/main.js"]
+
+# Runs the DB dump script in a Kubernetes CronJob. Requires a shell so it can't
+# reuse the distroless `production` image above
+FROM node:22-slim AS db-dumper
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates gnupg curl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-17 \
+    && apt-get purge -y --auto-remove gnupg curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app/backend
+
+COPY --from=build /app/backend/dist/db-dump-standalone.js ./dist/db-dump-standalone.js
+COPY --from=deploy /prod/backend/node_modules ./node_modules
+
+USER node
+
+CMD ["node", "dist/db-dump-standalone.js"]

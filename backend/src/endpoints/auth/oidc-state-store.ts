@@ -16,7 +16,7 @@ export class StatelessOidcStateStore {
     store(
         _request: Request,
         _ctx: SessionStoreContext,
-        appState: object | undefined,
+        appState: unknown,
         _meta: object | undefined,
         callback: (error: Error | null, handle?: string) => void,
     ): void {

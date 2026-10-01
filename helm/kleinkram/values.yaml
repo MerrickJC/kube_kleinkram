@@ -77,6 +77,16 @@ migration:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: 500m, memory: 512Mi }
 
+# Database dumps authenticates as a separate, minimally-privileged Postgres role
+# rather than the api-server's own full-access DB user
+dbDump:
+  enabled: true
+  schedule: '0 */2 * * *'
+  backoffLimit: 2
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
 frontend:
   replicaCount: 1
   containerPort: 80
@@ -192,6 +202,8 @@ secretNames:
   #
   # DB_USER, DB_PASSWORD
   db: kleinkram-db-credentials
+  # DB_USER, DB_PASSWORD for the db-dump CronJob. Should be a read-only Postgres user
+  dbDump: kleinkram-db-dump-credentials
   # S3_ACCESS_KEY, S3_SECRET_KEY, S3_USER, S3_PASSWORD
   s3: kleinkram-s3-credentials
   # JWT_SECRET
@@ -212,6 +224,9 @@ secretNames:
 # doesn't care what the Secret's keys are called, only what's in values here.
 secretKeys:
   db:
+    user: DB_USER
+    password: DB_PASSWORD
+  dbDump:
     user: DB_USER
     password: DB_PASSWORD
   s3:
