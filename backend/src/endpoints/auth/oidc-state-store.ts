@@ -20,7 +20,13 @@ export class StatelessOidcStateStore {
         _meta: object | undefined,
         callback: (error: Error | null, handle?: string) => void,
     ): void {
-        callback(null, typeof appState === 'string' ? appState : '');
+        // passport-openidconnect requires appState to be a non-null values
+        callback(
+            null,
+            typeof appState === 'string' && appState.length > 0
+                ? appState
+                : 'none',
+        );
     }
 
     verify(
