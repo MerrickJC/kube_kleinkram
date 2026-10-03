@@ -3,7 +3,7 @@
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { execFile } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { unlink } from 'node:fs/promises';
+import { stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -69,11 +69,13 @@ async function main(): Promise<void> {
     console.log(
         `Uploading dump as "${objectName}" to bucket "${bucketName}"...`,
     );
+    const { size: dumpFileSize } = await stat(dumpFile);
     await client.send(
         new PutObjectCommand({
             Bucket: bucketName,
             Key: objectName,
             Body: createReadStream(dumpFile),
+            ContentLength: dumpFileSize,
         }),
     );
 
