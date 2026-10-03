@@ -205,6 +205,14 @@ secretNames:
   # DB_USER, DB_PASSWORD for the db-dump CronJob. Should be a read-only Postgres user
   dbDump: kleinkram-db-dump-credentials
   # S3_ACCESS_KEY, S3_SECRET_KEY, S3_USER, S3_PASSWORD
+  #
+  # The backend vends per-upload scoped credentials via STS AssumeRole.
+  # If the storage backend is JuiceFS's S3 gateway, this MUST be a regular
+  # gateway user (created via `mc admin user add` against the gateway, with
+  # a policy granting it S3 access to the configured buckets). JuiceFS's
+  # AssumeRole API explicitly rejects the gateway's bootstrap/superuser
+  # (env-var) credentials, so pointing this at the superuser will make every
+  # upload fail at the AssumeRole call
   s3: kleinkram-s3-credentials
   # JWT_SECRET
   jwt: kleinkram-jwt-secret

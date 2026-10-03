@@ -19,20 +19,13 @@ import { Readable } from 'node:stream';
 import { S3StorageBucket } from './s3-storage-bucket';
 import { StorageAuthService } from './storage-auth.service';
 import { S3ClientContainer } from './storage-config.factory';
-import { StorageMetricsService } from './storage-metrics.service';
-import {
-    StorageCredentials,
-    StorageItem,
-    StorageItemStat,
-    StorageSystemMetrics,
-} from './types';
+import { StorageCredentials, StorageItem, StorageItemStat } from './types';
 
 @Injectable()
 export class StorageService implements OnModuleInit {
     constructor(
         @Inject('S3_CLIENTS')
         private readonly clients: S3ClientContainer,
-        private readonly metricsService: StorageMetricsService,
         private readonly authService: StorageAuthService,
     ) {}
 
@@ -329,20 +322,28 @@ export class StorageService implements OnModuleInit {
         bucketName: string,
         objectName: string,
     ): Promise<Record<string, string>> {
-        const command = new GetObjectTaggingCommand({
-            Bucket: bucketName,
-            Key: objectName,
-        });
-        const response = await this.clients.internal.send(command);
-        const tags: Record<string, string> = {};
-        if (response.TagSet) {
-            for (const tag of response.TagSet) {
-                if (tag.Key && tag.Value) {
-                    tags[tag.Key] = tag.Value;
+        try {
+            const command = new GetObjectTaggingCommand({
+                Bucket: bucketName,
+                Key: objectName,
+            });
+            const response = await this.clients.internal.send(command);
+            const tags: Record<string, string> = {};
+            if (response.TagSet) {
+                for (const tag of response.TagSet) {
+                    if (tag.Key && tag.Value) {
+                        tags[tag.Key] = tag.Value;
+                    }
                 }
             }
+            return tags;
+        } catch (error) {
+            Logger.warn(
+                `Failed to get tags for ${objectName}: ${String(error)}`,
+                'StorageService:getTags',
+            );
+            return {};
         }
-        return tags;
     }
 
     async addTags(
@@ -350,35 +351,39 @@ export class StorageService implements OnModuleInit {
         objectName: string,
         tags: Record<string, string>,
     ): Promise<void> {
-        const command = new PutObjectTaggingCommand({
-            Bucket: bucketName,
-            Key: objectName,
-            Tagging: {
-                TagSet: Object.entries(tags).map(([key, value]) => ({
-                    Key: key,
-                    Value: value,
-                })),
-            },
-        });
-        await this.clients.internal.send(command);
+        try {
+            const command = new PutObjectTaggingCommand({
+                Bucket: bucketName,
+                Key: objectName,
+                Tagging: {
+                    TagSet: Object.entries(tags).map(([key, value]) => ({
+                        Key: key,
+                        Value: value,
+                    })),
+                },
+            });
+            await this.clients.internal.send(command);
+        } catch (error) {
+            Logger.warn(
+                `Failed to add tags for ${objectName}: ${String(error)}`,
+                'StorageService:addTags',
+            );
+        }
     }
 
     async removeTags(bucketName: string, objectName: string): Promise<void> {
-        const command = new DeleteObjectTaggingCommand({
-            Bucket: bucketName,
-            Key: objectName,
-        });
-        await this.clients.internal.send(command);
-    }
-
-    async getSystemMetrics(): Promise<StorageSystemMetrics> {
-        const bucket = new S3StorageBucket(
-            'unused',
-            this.clients,
-            this.authService,
-            this.metricsService,
-        );
-        return bucket.getSystemMetrics();
+        try {
+            const command = new DeleteObjectTaggingCommand({
+                Bucket: bucketName,
+                Key: objectName,
+            });
+            await this.clients.internal.send(command);
+        } catch (error) {
+            Logger.warn(
+                `Failed to remove tags for ${objectName}: ${String(error)}`,
+                'StorageService:removeTags',
+            );
+        }
     }
 
     async generateTemporaryCredential(

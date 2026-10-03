@@ -14,13 +14,6 @@ export interface StorageItemStat {
     metaData: Record<string, string>;
 }
 
-export interface StorageSystemMetrics {
-    usedBytes: number;
-    totalBytes: number;
-    usedInodes: number;
-    totalInodes: number;
-}
-
 export interface StorageCredentials {
     accessKey: string;
     secretKey: string;
@@ -47,8 +40,6 @@ export interface IStorageBucket {
     listFiles(): Promise<StorageItem[]>;
 
     getFileInfo(objectName: string): Promise<StorageItemStat | undefined>;
-
-    getSystemMetrics?(): Promise<StorageSystemMetrics>;
 
     uploadFile(
         objectName: string,

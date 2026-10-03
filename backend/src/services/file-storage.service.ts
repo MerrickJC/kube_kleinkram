@@ -3,6 +3,7 @@ import { FileAuditService } from '@kleinkram/backend-common/audit/file-audit.ser
 import { ActionEntity } from '@kleinkram/backend-common/entities/action/action.entity';
 import { FileEntity } from '@kleinkram/backend-common/entities/file/file.entity';
 import { UserEntity } from '@kleinkram/backend-common/entities/user/user.entity';
+import environment from '@kleinkram/backend-common/environment';
 import {
     IStorageBucket,
     StorageItem,
@@ -87,18 +88,32 @@ export class FileStorageService {
         );
     }
 
-    async getStorage(): Promise<StorageOverviewDto> {
-        const metrics = await this.dataStorage.getSystemMetrics?.();
-        if (!metrics) {
-            return {
-                usedBytes: 0,
-                totalBytes: 0,
-                usedInodes: 0,
-                totalInodes: 0,
-            };
-        }
+    /**
+     * Sums the sizes of all stored files from Postgres rather than querying
+     * the storage backend. There's no S3-API way to ask "how much have I
+     * used" so the FileEntity.size column (kept accurate by
+     * recomputeFileSizes()) is the only source for this
+     */
+    async getUsedBytes(): Promise<number> {
+        const { total } = (await this.fileRepository
+            .createQueryBuilder('file')
+            .select('COALESCE(SUM(file.size), 0)', 'total')
+            .where('file.state IN (:...states)', {
+                states: [FileState.OK, FileState.FOUND, FileState.UPLOADING],
+            })
+            .getRawOne<{ total: string }>()) ?? { total: '0' };
 
-        return metrics;
+        return Number.parseInt(total, 10);
+    }
+
+    async getStorage(): Promise<StorageOverviewDto> {
+        const usedBytes = await this.getUsedBytes();
+        return {
+            usedBytes,
+            totalBytes: environment.STORAGE_QUOTA_BYTES ?? 0,
+            usedInodes: 0,
+            totalInodes: 0,
+        };
     }
 
     async renameTags(): Promise<void> {

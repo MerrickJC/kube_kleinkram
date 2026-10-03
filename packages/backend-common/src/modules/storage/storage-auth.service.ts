@@ -4,6 +4,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { StorageCredentials } from './types';
 
+// JuiceFS's gateway (like AWS STS) requires a RoleArn to be present on
+// AssumeRole, but ignores its value entirely for role-self-assumption so
+// any syntactically plausible, sufficiently long string is accepted
+const PLACEHOLDER_ROLE_ARN =
+    'arn:aws:iam::000000000000:role/kleinkram-upload-session';
+
 @Injectable()
 export class StorageAuthService {
     private readonly stsClient: STSClient;
@@ -30,7 +36,6 @@ export class StorageAuthService {
                 accessKeyId: environment.S3_ACCESS_KEY,
                 secretAccessKey: environment.S3_SECRET_KEY,
             },
-            // Force AWS Signature V4 without payload signing to match SeaweedFS STS implementation expectations
             systemClockOffset: 0,
         });
     }
@@ -47,7 +52,7 @@ export class StorageAuthService {
                     Action: [
                         's3:PutObject',
                         // Required for multipart uploads (files >8MB via boto3/aws sdk)
-                        // SeaweedFS enforces each of these as distinct actions
+                        // The gateway enforces each of these as distinct actions
                         's3:CreateMultipartUpload',
                         's3:UploadPart',
                         's3:CompleteMultipartUpload',
@@ -60,8 +65,8 @@ export class StorageAuthService {
         };
         const sessionName = `UploadSession-${crypto.randomUUID()}`;
 
-        // @ts-expect-error SeaweedFS supports omitting RoleArn for self-assumption
         const command = new AssumeRoleCommand({
+            RoleArn: PLACEHOLDER_ROLE_ARN,
             RoleSessionName: sessionName,
             Policy: JSON.stringify(policy),
             DurationSeconds: 60 * 60 * 4, // 4 hours

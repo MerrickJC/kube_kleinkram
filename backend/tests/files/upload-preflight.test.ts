@@ -1,9 +1,15 @@
+const mockEnvironment: {
+    S3_DATA_BUCKET_NAME: string;
+    STORAGE_QUOTA_BYTES?: number;
+} = {
+    S3_DATA_BUCKET_NAME: 'test-bucket',
+    STORAGE_QUOTA_BYTES: 1000,
+};
+
 jest.mock('@kleinkram/backend-common/environment', () => ({
     /* eslint-disable-next-line @typescript-eslint/naming-convention */
     __esModule: true,
-    default: {
-        S3_DATA_BUCKET_NAME: 'test-bucket',
-    },
+    default: mockEnvironment,
 }));
 
 import {
@@ -22,16 +28,25 @@ import { TriggerService } from '../../src/services/trigger.service';
 
 describe('File Upload Pre-Flight Capacity Check', () => {
     let service: FileLifecycleService;
-    let mockGetSystemMetrics: jest.Mock;
+    let mockGetRawOne: jest.Mock;
+    let mockFileRepository: jest.Mocked<Repository<FileEntity>>;
     let mockMissionRepo: jest.Mocked<Repository<MissionEntity>>;
     let mockUserRepo: jest.Mocked<Repository<UserEntity>>;
     let mockDataSource: jest.Mocked<DataSource>;
 
     beforeEach(() => {
-        mockGetSystemMetrics = jest.fn().mockResolvedValue({
-            usedBytes: 800,
-            totalBytes: 1000, // 200 free bytes
-        });
+        mockEnvironment.STORAGE_QUOTA_BYTES = 1000;
+
+        // usedBytes = 800, STORAGE_QUOTA_BYTES = 1000 -> 200 free bytes
+        mockGetRawOne = jest.fn().mockResolvedValue({ total: '800' });
+        const queryBuilder: Record<string, jest.Mock> = {};
+        queryBuilder.select = jest.fn().mockReturnValue(queryBuilder);
+        queryBuilder.where = jest.fn().mockReturnValue(queryBuilder);
+        queryBuilder.getRawOne = mockGetRawOne;
+
+        mockFileRepository = {
+            createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+        } as unknown as jest.Mocked<Repository<FileEntity>>;
 
         mockMissionRepo = {
             findOneOrFail: jest.fn().mockResolvedValue({
@@ -45,7 +60,6 @@ describe('File Upload Pre-Flight Capacity Check', () => {
         } as unknown as jest.Mocked<Repository<UserEntity>>;
 
         const mockDataStorage = {
-            getSystemMetrics: mockGetSystemMetrics,
             generateTemporaryCredential: jest.fn().mockResolvedValue({}),
         } as unknown as jest.Mocked<IStorageBucket>;
 
@@ -79,7 +93,7 @@ describe('File Upload Pre-Flight Capacity Check', () => {
         } as unknown as jest.Mocked<DataSource>;
 
         service = new FileLifecycleService(
-            {} as unknown as jest.Mocked<Repository<FileEntity>>,
+            mockFileRepository,
             mockMissionRepo,
             mockUserRepo,
             {} as unknown as jest.Mocked<Repository<CategoryEntity>>,
@@ -105,7 +119,7 @@ describe('File Upload Pre-Flight Capacity Check', () => {
             [150], // 150 bytes requested < 200 free bytes
         );
         expect(result).toBeDefined();
-        expect(mockGetSystemMetrics).toHaveBeenCalledTimes(1);
+        expect(mockGetRawOne).toHaveBeenCalledTimes(1);
     });
 
     it('should allow upload when requested size exactly equals free space', async () => {
@@ -118,7 +132,7 @@ describe('File Upload Pre-Flight Capacity Check', () => {
             [200], // exactly 200 free bytes
         );
         expect(result).toBeDefined();
-        expect(mockGetSystemMetrics).toHaveBeenCalledTimes(1);
+        expect(mockGetRawOne).toHaveBeenCalledTimes(1);
     });
 
     it('should throw INSUFFICIENT_STORAGE if requested size exceeds free space', async () => {
@@ -168,7 +182,7 @@ describe('File Upload Pre-Flight Capacity Check', () => {
             // no fileSizes argument
         );
         expect(result).toBeDefined();
-        expect(mockGetSystemMetrics).not.toHaveBeenCalled();
+        expect(mockGetRawOne).not.toHaveBeenCalled();
     });
 
     it('should skip capacity check when fileSizes is an empty array', async () => {
@@ -181,32 +195,13 @@ describe('File Upload Pre-Flight Capacity Check', () => {
             [],
         );
         expect(result).toBeDefined();
-        expect(mockGetSystemMetrics).not.toHaveBeenCalled();
+        expect(mockGetRawOne).not.toHaveBeenCalled();
     });
 
-    it('should skip capacity check if getSystemMetrics is not implemented on the storage bucket', async () => {
-        // Create a custom service instance where the storage bucket does not have getSystemMetrics
-        const mockDataStorageNoMetrics = {
-            generateTemporaryCredential: jest.fn().mockResolvedValue({}),
-        } as unknown as jest.Mocked<IStorageBucket>;
+    it('should skip capacity check when no storage quota is configured', async () => {
+        mockEnvironment.STORAGE_QUOTA_BYTES = undefined;
 
-        const serviceNoMetrics = new FileLifecycleService(
-            {} as unknown as jest.Mocked<Repository<FileEntity>>,
-            mockMissionRepo, // reuse the mocked repo
-            mockUserRepo, // reuse the mocked repo
-            {} as unknown as jest.Mocked<Repository<CategoryEntity>>,
-            mockDataStorageNoMetrics,
-            mockDataSource, // reuse the mocked dataSource
-            { log: jest.fn() } as unknown as jest.Mocked<FileAuditService>,
-            {
-                addFileEvent: jest.fn(),
-            } as unknown as jest.Mocked<TriggerService>,
-            {
-                canAccessMission: jest.fn().mockResolvedValue(true),
-            } as unknown as jest.Mocked<MissionGuardService>,
-        );
-
-        const result = await serviceNoMetrics.getTemporaryAccess(
+        const result = await service.getTemporaryAccess(
             ['test.bag'],
             'mission-uuid',
             'user-uuid',
@@ -215,5 +210,6 @@ describe('File Upload Pre-Flight Capacity Check', () => {
             [150],
         );
         expect(result).toBeDefined();
+        expect(mockGetRawOne).not.toHaveBeenCalled();
     });
 });

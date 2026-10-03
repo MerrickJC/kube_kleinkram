@@ -17,13 +17,11 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { StorageAuthService } from './storage-auth.service';
 import { S3ClientContainer } from './storage-config.factory';
-import { MetricPoint, StorageMetricsService } from './storage-metrics.service';
 import {
     IStorageBucket,
     StorageCredentials,
     StorageItem,
     StorageItemStat,
-    StorageSystemMetrics,
 } from './types';
 
 export class S3StorageBucket implements IStorageBucket {
@@ -31,7 +29,6 @@ export class S3StorageBucket implements IStorageBucket {
         private readonly bucketName: string,
         private readonly clients: S3ClientContainer,
         private readonly authService: StorageAuthService,
-        private readonly metricsService?: StorageMetricsService,
     ) {}
 
     private async generatePresignedUrl(
@@ -198,93 +195,79 @@ export class S3StorageBucket implements IStorageBucket {
         await this.clients.internal.send(command);
     }
 
-    async getSystemMetrics(): Promise<StorageSystemMetrics> {
-        if (!this.metricsService) {
-            return {
-                usedBytes: 0,
-                totalBytes: 0,
-                usedInodes: 0,
-                totalInodes: 0,
-            };
-        }
-        const raw = await this.metricsService.getSystemMetrics();
-
-        const totalRaw = raw.seaweedfs_master_disk_total_bytes as
-            MetricPoint[] | undefined;
-        const volRecord = raw.SeaweedFS_volumeServer_resource as
-            MetricPoint[] | undefined;
-
-        const totalValue =
-            totalRaw?.[0]?.value ??
-            volRecord?.find((m) => m.labels.type === 'all')?.value;
-        const total = totalValue ?? 0;
-
-        const freeRaw = raw.seaweedfs_master_disk_free_bytes as
-            MetricPoint[] | undefined;
-        const freeValue =
-            freeRaw?.[0]?.value ??
-            volRecord?.find((m) => m.labels.type === 'free')?.value;
-        const free = freeValue ?? 0;
-
-        if (totalValue === undefined && freeValue === undefined) {
-            Logger.warn(
-                'SeaweedFS storage metrics (seaweedfs_master_disk_total_bytes or SeaweedFS_volumeServer_resource) were not found in the parsed response. Storage capacity views may read zero.',
-                'S3StorageBucket:getSystemMetrics',
-            );
-        }
-
-        return {
-            usedBytes: total - free,
-            totalBytes: total,
-            usedInodes: 0,
-            totalInodes: 0,
-        };
-    }
-
+    /**
+     * Object tagging isn't part of the core S3 API and support varies across
+     * S3-compatible implementations. Nothing in this app reads tags back
+     * (they're mirrored onto the object purely for out-of-band visibility),
+     * so a tagging failure is logged and swallowed rather than failing the
+     * caller's operation (e.g. an upload-confirm request).
+     */
     async getTags(objectName: string): Promise<Record<string, string>> {
-        const command = new GetObjectTaggingCommand({
-            Bucket: this.bucketName,
-            Key: objectName,
-        });
-        const response = await this.clients.internal.send(command);
-        const tags: Record<string, string> = {};
-        if (response.TagSet) {
-            for (const tag of response.TagSet) {
-                if (tag.Key && tag.Value) {
-                    tags[tag.Key] = tag.Value;
+        try {
+            const command = new GetObjectTaggingCommand({
+                Bucket: this.bucketName,
+                Key: objectName,
+            });
+            const response = await this.clients.internal.send(command);
+            const tags: Record<string, string> = {};
+            if (response.TagSet) {
+                for (const tag of response.TagSet) {
+                    if (tag.Key && tag.Value) {
+                        tags[tag.Key] = tag.Value;
+                    }
                 }
             }
+            return tags;
+        } catch (error) {
+            Logger.warn(
+                `Failed to get tags for ${objectName}: ${String(error)}`,
+                'S3StorageBucket:getTags',
+            );
+            return {};
         }
-        return tags;
     }
 
     async addTags(
         objectName: string,
         tags: Record<string, string>,
     ): Promise<void> {
-        const command = new PutObjectTaggingCommand({
-            Bucket: this.bucketName,
-            Key: objectName,
-            Tagging: {
-                TagSet: Object.entries(tags).map(([key, value]) => ({
-                    Key: key,
-                    Value: value,
-                })),
-            },
-        });
-        await this.clients.internal.send(command);
+        try {
+            const command = new PutObjectTaggingCommand({
+                Bucket: this.bucketName,
+                Key: objectName,
+                Tagging: {
+                    TagSet: Object.entries(tags).map(([key, value]) => ({
+                        Key: key,
+                        Value: value,
+                    })),
+                },
+            });
+            await this.clients.internal.send(command);
+        } catch (error) {
+            Logger.warn(
+                `Failed to add tags for ${objectName}: ${String(error)}`,
+                'S3StorageBucket:addTags',
+            );
+        }
     }
 
     async removeTags(objectName: string): Promise<void> {
-        const command = new DeleteObjectTaggingCommand({
-            Bucket: this.bucketName,
-            Key: objectName,
-        });
-        await this.clients.internal.send(command);
+        try {
+            const command = new DeleteObjectTaggingCommand({
+                Bucket: this.bucketName,
+                Key: objectName,
+            });
+            await this.clients.internal.send(command);
+        } catch (error) {
+            Logger.warn(
+                `Failed to remove tags for ${objectName}: ${String(error)}`,
+                'S3StorageBucket:removeTags',
+            );
+        }
     }
 
     async generateTemporaryCredential(
-        filename: string, // This is usually the UUID/object name used for the ARN
+        filename: string,
     ): Promise<StorageCredentials> {
         return this.authService.generateTemporaryCredential(
             filename,

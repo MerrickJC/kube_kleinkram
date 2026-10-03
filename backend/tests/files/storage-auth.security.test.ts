@@ -11,6 +11,21 @@ import { Test, TestingModule } from '@nestjs/testing';
 import environment from '../../../packages/backend-common/src/environment';
 import { StorageAuthService } from '../../../packages/backend-common/src/modules/storage/storage-auth.service';
 
+/**
+ * This test proves that the storage backend's STS AssumeRole actually
+ * enforces the inline session policy the way AWS STS does (scoped PutObject
+ * succeeds, everything else is denied) - something the backend's own docs
+ * don't fully guarantee, so this needs to keep passing against whatever
+ * S3-compatible backend is configured.
+ *
+ * JuiceFS's gateway (v1.2+) requires the credential used to call AssumeRole
+ * to be a *regular* gateway user created via `mc admin user add` - its
+ * bootstrap/superuser (env-var) credential is explicitly rejected by
+ * AssumeRole. So S3_ACCESS_KEY/S3_SECRET_KEY in the test environment must be
+ * such a regular user, not the gateway's root account, or every test here
+ * will fail at the AssumeRole call itself rather than at the policy checks
+ * they're meant to exercise.
+ */
 describe('StorageAuthService - STS Security Enforcement (Integration)', () => {
     let authService: StorageAuthService;
     let moduleReference: TestingModule;
@@ -70,7 +85,7 @@ describe('StorageAuthService - STS Security Enforcement (Integration)', () => {
                     secretAccessKey: creds.secretKey,
                     sessionToken: creds.sessionToken,
                 },
-                forcePathStyle: true, // Necessary for SeaweedFS/MinIO
+                forcePathStyle: true, // Necessary for SeaweedFS/JuiceFS/MinIO
             });
 
             // 3. Positive Test: Putting the exact object should succeed
