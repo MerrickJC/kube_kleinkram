@@ -394,13 +394,24 @@ export class FileLifecycleService implements OnModuleInit {
             where: { uuid: userUUID },
         });
 
+        // There's no S3-API way to query a storage backend's free capacity,
+        // so the ceiling is an application-level configured value. Skip the
+        // check entirely if no ceiling has been configured.
         if (
             fileSizes &&
             fileSizes.length > 0 &&
-            this.dataStorage.getSystemMetrics
+            env.STORAGE_QUOTA_BYTES !== undefined
         ) {
-            const metrics = await this.dataStorage.getSystemMetrics();
-            const freeBytes = metrics.totalBytes - metrics.usedBytes;
+            const usedBytes = await this.fileRepository
+                .createQueryBuilder('file')
+                .select('COALESCE(SUM(file.size), 0)', 'total')
+                .where('file.state IN (:...states)', {
+                    states: [FileState.OK, FileState.FOUND, FileState.UPLOADING],
+                })
+                .getRawOne<{ total: string }>()
+                .then((row) => Number.parseInt(row?.total ?? '0', 10));
+
+            const freeBytes = env.STORAGE_QUOTA_BYTES - usedBytes;
             const totalRequestedSize = fileSizes.reduce(
                 (sum, size) => sum + size,
                 0,

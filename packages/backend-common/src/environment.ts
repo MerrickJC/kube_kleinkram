@@ -61,6 +61,25 @@ function asOptionalString(key: string): string | undefined {
     return value;
 }
 
+/**
+ * Returns environment variable as number or undefined if not set
+ *
+ * @param key - environment variable name
+ * @returns environment variable as number or undefined
+ */
+function asOptionalNumber(key: string): number | undefined {
+    const stringValue = asOptionalString(key);
+    if (stringValue === undefined) {
+        return undefined;
+    }
+    const numberValue = Number.parseFloat(stringValue);
+    if (Number.isNaN(numberValue)) {
+        const message = `The environment variable "${key}" has to hold a stringified number value - not ${stringValue}`;
+        throw new Error(message);
+    }
+    return numberValue;
+}
+
 export default {
     /**
      * @returns database name
@@ -144,6 +163,18 @@ export default {
 
     get S3_ENDPOINT_INTERNAL(): string | undefined {
         return asOptionalString('S3_ENDPOINT_INTERNAL');
+    },
+
+    /**
+     * Total storage capacity, in bytes, used as the ceiling for the
+     * "insufficient storage" pre-upload check and the storage-overview UI.
+     * There is no S3-API-level way to query a backend's physical capacity,
+     * so this is an application-level configured value rather than
+     * something read from the storage backend. Undefined means "unknown/no
+     * configured ceiling" (reported as 0 totalBytes)
+     */
+    get STORAGE_QUOTA_BYTES(): number | undefined {
+        return asOptionalNumber('STORAGE_QUOTA_BYTES');
     },
 
     get S3_USER(): string {
