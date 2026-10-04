@@ -21,10 +21,8 @@ jobs:
               name: Build the Docker compose images
               run: docker compose -f docker-compose.prod.yml build api-server frontend queue-consumer documentation migrator db-dumper
               env:
-                  BACKEND_URL: ${{ vars.BACKEND_URL }}
                   GIT_BRANCH: ${{ github.ref_name }}
                   GIT_COMMIT: ${{ github.sha }}
-                  S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
                   BUILDX_NO_DEFAULT_ATTESTATIONS: 1
             - name: Tag images with immutable app version
               run: |
