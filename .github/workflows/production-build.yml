@@ -15,6 +15,9 @@ jobs:
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v4
 
+            - name: Expose GitHub Actions cache variables
+              uses: crazy-max/ghaction-github-runtime@v3
+
             - name: Login to registry
               run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login registry.direct.merrickcampbell.au -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
             - name: Read app version
