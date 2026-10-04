@@ -51,11 +51,6 @@ export class StorageAuthService {
                     Effect: 'Allow',
                     Action: [
                         's3:PutObject',
-                        // Required for multipart uploads (files >8MB via boto3/aws sdk)
-                        // The gateway enforces each of these as distinct actions
-                        's3:CreateMultipartUpload',
-                        's3:UploadPart',
-                        's3:CompleteMultipartUpload',
                         's3:AbortMultipartUpload',
                         's3:ListMultipartUploadParts',
                     ],
