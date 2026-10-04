@@ -6,6 +6,10 @@ services:
         build:
             context: .
             dockerfile: docker/base.Dockerfile
+            cache_from:
+                - type=gha,scope=base
+            cache_to:
+                - type=gha,mode=max,scope=base
 
     api-server:
         image: registry.direct.merrickcampbell.au/kleinkram:api-server-dev
@@ -15,6 +19,10 @@ services:
             context: .
             dockerfile: docker/backend.Dockerfile
             target: production
+            cache_from:
+                - type=gha,scope=backend
+            cache_to:
+                - type=gha,mode=max,scope=backend
 
         ports:
             - 127.0.0.1:${SERVER_PORT}:${SERVER_PORT}
@@ -50,6 +58,10 @@ services:
             context: .
             dockerfile: docker/backend.Dockerfile
             target: migrator
+            cache_from:
+                - type=gha,scope=backend
+            cache_to:
+                - type=gha,mode=max,scope=backend
 
         env_file:
             - .env
@@ -74,6 +86,10 @@ services:
             context: .
             dockerfile: docker/backend.Dockerfile
             target: db-dumper
+            cache_from:
+                - type=gha,scope=backend
+            cache_to:
+                - type=gha,mode=max,scope=backend
 
         env_file:
             - .env
@@ -143,6 +159,10 @@ services:
                 - GIT_BRANCH=${GIT_BRANCH}
                 - GIT_COMMIT=${GIT_COMMIT}
                 - VITE_S3_ENDPOINT=https://juicefs-s3.direct.merrickcampbell.au
+            cache_from:
+                - type=gha,scope=frontend
+            cache_to:
+                - type=gha,mode=max,scope=frontend
         volumes:
             - ./frontend:/app/frontend
             - ./packages:/app/packages
@@ -169,6 +189,10 @@ services:
             context: .
             dockerfile: docker/queue-consumer.Dockerfile
             target: production
+            cache_from:
+                - type=gha,scope=queue-consumer
+            cache_to:
+                - type=gha,mode=max,scope=queue-consumer
         env_file:
             - .env
         networks:
@@ -250,6 +274,10 @@ services:
             target: production
             args:
                 - MODE=staging
+            cache_from:
+                - type=gha,scope=docs
+            cache_to:
+                - type=gha,mode=max,scope=docs
         ports:
             - '4000:80'
 

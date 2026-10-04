@@ -12,6 +12,9 @@ jobs:
         steps:
             - uses: actions/checkout@v7
 
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v4
+
             - name: Login to registry
               run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login registry.direct.merrickcampbell.au -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
             - name: Read app version
@@ -24,6 +27,7 @@ jobs:
                   GIT_BRANCH: ${{ github.ref_name }}
                   GIT_COMMIT: ${{ github.sha }}
                   BUILDX_NO_DEFAULT_ATTESTATIONS: 1
+                  COMPOSE_BAKE: 'true'
             - name: Tag images with immutable app version
               run: |
                   for service in api-server frontend queue-consumer docs migrator db-dumper; do
