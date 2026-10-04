@@ -149,6 +149,12 @@ actions:
   # Separate from image.pullSecrets since Action images may be in a
   # different registry than this app's own images
   imagePullSecrets: []
+  # Identity Argo's own init/wait (argoexec) containers run as. Kept separate
+  # from serviceAccountName above: Argo mounts this one only into its own
+  # system containers (via Workflow spec.executor.serviceAccountName), never
+  # into the user-supplied main container, so Action images still never see
+  # a Kubernetes API token
+  executorServiceAccountName: kleinkram-action-executor
 
 # set redis.enabled=false to point at an externally-managed Redis instead
 # (you would then configure redis via config.redisHost/redisPort in the

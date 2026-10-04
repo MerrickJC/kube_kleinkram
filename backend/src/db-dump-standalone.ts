@@ -63,6 +63,7 @@ async function main(): Promise<void> {
         },
         region: 'us-east-1',
         forcePathStyle: true,
+        requestChecksumCalculation: 'WHEN_REQUIRED',
     });
 
     const objectName = dumpFile.slice(dumpFile.lastIndexOf('/') + 1);

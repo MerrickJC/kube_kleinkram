@@ -59,12 +59,14 @@ export const S3ClientFactory = {
                 credentials,
                 region: 'us-east-1',
                 forcePathStyle: true,
+                requestChecksumCalculation: 'WHEN_REQUIRED',
             }),
             internal: new S3Client({
                 endpoint: internalEndpoint,
                 credentials,
                 region: 'us-east-1',
                 forcePathStyle: true,
+                requestChecksumCalculation: 'WHEN_REQUIRED',
             }),
         };
     },
