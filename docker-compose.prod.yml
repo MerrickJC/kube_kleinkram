@@ -9,6 +9,10 @@ services:
         build:
             context: .
             dockerfile: docker/base.Dockerfile
+            cache_from:
+                - type=gha,scope=base
+            cache_to:
+                - type=gha,mode=max,scope=base
 
     api-server:
         image: registry.direct.merrickcampbell.au/kleinkram:api-server-latest
@@ -20,6 +24,10 @@ services:
             target: production
             additional_contexts:
                 kleinkram-base: service:base
+            cache_from:
+                - type=gha,scope=backend
+            cache_to:
+                - type=gha,mode=max,scope=backend
 
         ports:
             - 127.0.0.1:${SERVER_PORT}:${SERVER_PORT}
@@ -52,6 +60,10 @@ services:
             context: .
             dockerfile: docker/backend.Dockerfile
             target: migrator
+            cache_from:
+                - type=gha,scope=backend
+            cache_to:
+                - type=gha,mode=max,scope=backend
 
         env_file:
             - .env
@@ -76,6 +88,10 @@ services:
             context: .
             dockerfile: docker/backend.Dockerfile
             target: db-dumper
+            cache_from:
+                - type=gha,scope=backend
+            cache_to:
+                - type=gha,mode=max,scope=backend
 
         env_file:
             - .env
@@ -141,12 +157,16 @@ services:
             dockerfile: docker/frontend.Dockerfile
             target: production
             args:
-                - BACKEND_URL=${BACKEND_URL}
+                - BACKEND_URL=https://kleinkram-api.merrickcampbell.au
                 - GIT_BRANCH=${GIT_BRANCH}
                 - GIT_COMMIT=${GIT_COMMIT}
-                - VITE_S3_ENDPOINT=${S3_ENDPOINT}
+                - VITE_S3_ENDPOINT=https://juicefs-s3.direct.merrickcampbell.au
             additional_contexts:
                 kleinkram-base: service:base
+            cache_from:
+                - type=gha,scope=frontend
+            cache_to:
+                - type=gha,mode=max,scope=frontend
 
         ports:
             - '8003:80'
@@ -171,6 +191,10 @@ services:
             target: production
             additional_contexts:
                 kleinkram-base: service:base
+            cache_from:
+                - type=gha,scope=queue-consumer
+            cache_to:
+                - type=gha,mode=max,scope=queue-consumer
         ports:
             - '127.0.0.1:8080:3000'
         env_file:
@@ -253,6 +277,10 @@ services:
             context: .
             dockerfile: docker/docs.Dockerfile
             target: production
+            cache_from:
+                - type=gha,scope=docs
+            cache_to:
+                - type=gha,mode=max,scope=docs
         ports:
             - '4000:80'
 
