@@ -33,6 +33,19 @@ export function actionPodServiceAccount(): string {
     return process.env.ACTION_POD_SERVICE_ACCOUNT ?? 'kleinkram-action-pod';
 }
 
+// The identity Argo's own init/wait (argoexec) containers run as. Kept
+// separate from actionPodServiceAccount since that SA has no Kubernetes API
+// token mounted (so user-supplied Action images can't reach the API), but
+// argoexec needs one to patch WorkflowTaskResult objects. Set via Workflow
+// spec.executor.serviceAccountName, which Argo mounts only into its own
+// system containers, not the main container
+export function actionExecutorServiceAccount(): string {
+    return (
+        process.env.ACTION_EXECUTOR_SERVICE_ACCOUNT ??
+        'kleinkram-action-executor'
+    );
+}
+
 export function workflowNameForAction(actionUuid: string): string {
     return `action-${actionUuid}`;
 }

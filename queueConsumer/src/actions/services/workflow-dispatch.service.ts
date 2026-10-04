@@ -25,6 +25,7 @@ import {
     ACTION_MANAGED_BY_LABEL_KEY,
     ACTION_MANAGED_BY_LABEL_VALUE,
     ACTION_UUID_LABEL,
+    actionExecutorServiceAccount,
     actionPodServiceAccount,
     actionsNamespace,
     apiKeySecretNameForAction,
@@ -274,6 +275,9 @@ export class WorkflowDispatchService {
             spec: {
                 entrypoint: 'run-action',
                 serviceAccountName: actionPodServiceAccount(),
+                executor: {
+                    serviceAccountName: actionExecutorServiceAccount(),
+                },
                 activeDeadlineSeconds,
                 podGC: { strategy: 'OnWorkflowCompletion' },
                 ttlStrategy: { secondsAfterCompletion: 86_400 },
