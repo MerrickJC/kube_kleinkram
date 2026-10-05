@@ -301,6 +301,12 @@ kueue:
     cpu:
       cpu: '16'
       memory: 64Gi
+      # Covers the emptyDir mounted at /out for Action containers (see
+      # workflow-dispatch.service.ts). Kueue refuses to admit a pod
+      # requesting a resource that isn't in the ClusterQueue's
+      # coveredResources, so this must stay in sync with
+      # ACTION_OUTPUT_VOLUME_SIZE_LIMIT times expected concurrent actions.
+      ephemeralStorage: 500Gi
     gpu:
       nvidiaGpu: '2'
   # Optional flag to create WorkloadPriorityClasses
