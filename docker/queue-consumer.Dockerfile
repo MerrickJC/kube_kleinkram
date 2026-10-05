@@ -15,23 +15,15 @@ WORKDIR /app/queueConsumer
 CMD ["pnpm", "start:dev"]
 
 
-FROM node:22-slim AS build
+FROM kleinkram-builder AS build
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+COPY --chown=node:node queueConsumer/ ./queueConsumer/
 
-WORKDIR /app
-
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm fetch
-
-COPY . .
-RUN pnpm install -r
-
-RUN pnpm --filter @kleinkram/shared build
-RUN pnpm --filter @kleinkram/validation build
-RUN pnpm --filter @kleinkram/api-dto build
-RUN pnpm --filter @kleinkram/backend-common build
 RUN NODE_ENV=production pnpm --filter kleinkram-queue-consumer build
+
+# pnpm deploy writes outside /app (into /prod), which the non-root `node`
+# user (inherited from kleinkram-base) can't create at the filesystem root
+USER root
 RUN pnpm deploy --filter=kleinkram-queue-consumer --prod --legacy /prod/queueConsumer
 
 FROM node:22-slim AS production

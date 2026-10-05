@@ -11,23 +11,10 @@ WORKDIR /app/backend
 CMD ["./entrypoint.sh"]
 
 
-FROM node:22-slim AS build
+FROM kleinkram-builder AS build
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+COPY --chown=node:node backend/ ./backend/
 
-WORKDIR /app
-
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm fetch
-
-COPY . .
-RUN pnpm install -r
-
-# Build packages and backend
-RUN pnpm --filter @kleinkram/shared build
-RUN pnpm --filter @kleinkram/validation build
-RUN pnpm --filter @kleinkram/api-dto build
-RUN pnpm --filter @kleinkram/backend-common build
 RUN NODE_ENV=production pnpm --filter kleinkram-backend build
 # Standalone entry point for the db-dumper CronJob image below. Compiled with
 # plain tsc since it has no @kleinkram/* or Nest dependencies
@@ -49,6 +36,9 @@ CMD ["pnpm", "run", "typeorm", "migration:run", "-d", "migration/prod/migration.
 
 FROM build AS deploy
 
+# pnpm deploy writes outside /app (into /prod), which the non-root `node`
+# user (inherited from kleinkram-base) can't create at the filesystem root
+USER root
 RUN pnpm deploy --filter=kleinkram-backend --prod --legacy /prod/backend
 
 FROM gcr.io/distroless/nodejs22-debian12 AS production

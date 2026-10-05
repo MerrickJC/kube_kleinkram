@@ -5,10 +5,7 @@ WORKDIR /app/frontend
 CMD ["pnpm", "start:dev"]
 
 
-FROM node:22-slim AS build
-
-
-RUN corepack enable && corepack prepare pnpm@latest --activate
+FROM kleinkram-builder AS build
 
 ARG BACKEND_URL
 ENV BACKEND_URL=$BACKEND_URL
@@ -22,22 +19,13 @@ ENV GIT_COMMIT=$GIT_COMMIT
 ARG VITE_S3_ENDPOINT
 ENV VITE_S3_ENDPOINT=$VITE_S3_ENDPOINT
 
-WORKDIR /app
-
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm fetch
-
-COPY . .
-RUN pnpm install -r
+COPY --chown=node:node frontend/ ./frontend/
 
 # Generate build info explicitly to ensure it captures build-time ARGs
 WORKDIR /app/frontend
 RUN sh ./create_build_info.sh
 WORKDIR /app
 
-RUN pnpm --filter @kleinkram/shared build
-RUN pnpm --filter @kleinkram/validation build
-RUN pnpm --filter @kleinkram/api-dto build
 RUN pnpm --filter kleinkram-frontend build
 # Fail the image build if the configured backend URL did not make it into the bundle
 RUN sh ./frontend/scripts/check-backend-url.sh frontend/dist/spa
