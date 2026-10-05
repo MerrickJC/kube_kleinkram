@@ -42,6 +42,13 @@ const KUEUE_LOCAL_QUEUE = process.env.KUEUE_LOCAL_QUEUE ?? 'kleinkram-actions';
 const ARTIFACT_REPOSITORY_CONFIGMAP =
     process.env.ARGO_ARTIFACT_REPOSITORY_CONFIGMAP ??
     'kleinkram-artifact-repository';
+// Actions aren't trusted to create their own output directory (they may run
+// as a non-root user that can't mkdir at the image's filesystem root), so
+// /out is backed by an emptyDir volume instead. The size limit is fixed for
+// now since ActionTemplateEntity has no per-template disk quota field.
+const OUTPUT_VOLUME_NAME = 'out';
+const OUTPUT_VOLUME_SIZE_LIMIT =
+    process.env.ACTION_OUTPUT_VOLUME_SIZE_LIMIT ?? '10Gi';
 
 /**
  * Consumes `submit-action` jobs from the dispatch queue and turns an
@@ -221,6 +228,8 @@ export class WorkflowDispatchService {
                 memory: `${template.cpuMemory.toString()}Gi`,
             },
         };
+        resources.requests['ephemeral-storage'] = OUTPUT_VOLUME_SIZE_LIMIT;
+        resources.limits['ephemeral-storage'] = OUTPUT_VOLUME_SIZE_LIMIT;
         if (wantsGpu) {
             // Kubernetes NVIDIA plugins allocate entire GPU devices
             // so `gpuMemory > 0` maps to "one GPU"
@@ -256,6 +265,7 @@ export class WorkflowDispatchService {
                 capabilities: { drop: ['ALL'] },
                 allowPrivilegeEscalation: false,
             },
+            volumeMounts: [{ name: OUTPUT_VOLUME_NAME, mountPath: '/out' }],
         };
         if (template.entrypoint) container.command = [template.entrypoint];
         if (template.command) container.args = template.command.split(' ');
@@ -302,6 +312,14 @@ export class WorkflowDispatchService {
                     {
                         name: 'run-action',
                         container,
+                        volumes: [
+                            {
+                                name: OUTPUT_VOLUME_NAME,
+                                emptyDir: {
+                                    sizeLimit: OUTPUT_VOLUME_SIZE_LIMIT,
+                                },
+                            },
+                        ],
                         outputs: {
                             artifacts: [{ name: 'results', path: '/out' }],
                         },
