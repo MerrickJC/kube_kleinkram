@@ -1,5 +1,8 @@
-# Points Argo's built-in artifact upload at the already-installed SeaweedFS
-# bucket which Kleinkram writes artifacts to
+# Points Argo's built-in artifact upload at the already-installed S3-compatible
+# bucket which Kleinkram writes artifacts to. Uses config.s3EndpointInternal
+# when set (artifact traffic stays in-cluster) falling back to config.s3Endpoint
+# otherwise; "insecure" is derived from whichever endpoint's scheme is in play,
+# not set independently, so it can't drift out of sync with the endpoint
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,11 +11,12 @@ metadata:
   labels:
     {{- include "kleinkram.labels" . | nindent 4 }}
 data:
+  {{- $endpoint := .Values.config.s3EndpointInternal | default .Values.config.s3Endpoint }}
   {{ .Values.argo.artifactRepository.key }}: |
     s3:
       bucket: {{ .Values.config.s3ArtifactsBucketName }}
-      endpoint: {{ .Values.config.s3Endpoint | trimPrefix "http://" | trimPrefix "https://" | quote }}
-      insecure: {{ .Values.argo.artifactRepository.insecure }}
+      endpoint: {{ $endpoint | trimPrefix "http://" | trimPrefix "https://" | quote }}
+      insecure: {{ not (hasPrefix "https://" $endpoint) }}
       accessKeySecret:
         name: {{ .Values.argo.artifactRepository.credentialsSecretName }}
         key: {{ .Values.argo.artifactRepository.credentialsSecretKeys.accessKey }}

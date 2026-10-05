@@ -11,6 +11,18 @@ services:
             cache_to:
                 - type=gha,mode=max,scope=base
 
+    builder:
+        image: kleinkram-builder
+        build:
+            context: .
+            dockerfile: docker/builder.Dockerfile
+            additional_contexts:
+                kleinkram-base: service:base
+            cache_from:
+                - type=gha,scope=builder
+            cache_to:
+                - type=gha,mode=max,scope=builder
+
     api-server:
         image: registry.direct.merrickcampbell.au/kleinkram:api-server-dev
         container_name: kleinkram-api-server-dev
@@ -19,6 +31,9 @@ services:
             context: .
             dockerfile: docker/backend.Dockerfile
             target: production
+            additional_contexts:
+                kleinkram-base: service:base
+                kleinkram-builder: service:builder
             cache_from:
                 - type=gha,scope=backend
             cache_to:
@@ -58,6 +73,9 @@ services:
             context: .
             dockerfile: docker/backend.Dockerfile
             target: migrator
+            additional_contexts:
+                kleinkram-base: service:base
+                kleinkram-builder: service:builder
             cache_from:
                 - type=gha,scope=backend
             cache_to:
@@ -86,6 +104,9 @@ services:
             context: .
             dockerfile: docker/backend.Dockerfile
             target: db-dumper
+            additional_contexts:
+                kleinkram-base: service:base
+                kleinkram-builder: service:builder
             cache_from:
                 - type=gha,scope=backend
             cache_to:
@@ -159,6 +180,9 @@ services:
                 - GIT_BRANCH=${GIT_BRANCH}
                 - GIT_COMMIT=${GIT_COMMIT}
                 - VITE_S3_ENDPOINT=https://juicefs-s3.direct.merrickcampbell.au
+            additional_contexts:
+                kleinkram-base: service:base
+                kleinkram-builder: service:builder
             cache_from:
                 - type=gha,scope=frontend
             cache_to:
@@ -189,6 +213,9 @@ services:
             context: .
             dockerfile: docker/queue-consumer.Dockerfile
             target: production
+            additional_contexts:
+                kleinkram-base: service:base
+                kleinkram-builder: service:builder
             cache_from:
                 - type=gha,scope=queue-consumer
             cache_to:

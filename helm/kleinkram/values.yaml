@@ -183,11 +183,12 @@ config:
   redisPort: 6379
   dockerHubNamespace: rslethz
   vitePublicOauthFake: 'false'
-  # Cluster-internal SeaweedFS S3 endpoint used by the backend's own S3/STS
-  # calls (as opposed to `s3Endpoint`, which is also used to build presigned
-  # URLs handed to browsers/the CLI and so must stay externally reachable).
-  # Defaults to a bare `seaweedfs` hostname. Set this if `s3Endpoint` is a
-  # differs from the in-cluster Service address
+  # Cluster-internal S3 endpoint used by the backend's own S3/STS calls and by
+  # Argo's artifact repository config for Action artifact uploads (as opposed
+  # to `s3Endpoint`, which is used to build presigned URLs handed to
+  # browsers/the CLI and so must stay externally reachable). Defaults to a
+  # bare `seaweedfs` hostname. Set this if `s3Endpoint` differs from the
+  # in-cluster Service address
   s3EndpointInternal: ''
   # Generic OpenID Connect login provider (e.g. Dex, Keycloak, Okta, Auth0).
   # Leave blank to disable. secretNames.oidcOauth must be set with 
@@ -323,9 +324,6 @@ argo:
       accessKey: accessKey
       secretKey: secretKey
     key: artifactRepository
-    # Plain HTTP by default since SeaweedFS is typically reached over a
-    # cluster-internal Service without TLS. Set to false if using TLS
-    insecure: true
 
 policy:
   # Requires Kyverno (or Gatekeeper) to already be installed in the cluster

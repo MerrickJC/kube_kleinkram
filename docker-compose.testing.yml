@@ -6,6 +6,14 @@ services:
             context: .
             dockerfile: docker/base.Dockerfile
 
+    builder:
+        image: kleinkram-builder
+        build:
+            context: .
+            dockerfile: docker/builder.Dockerfile
+            additional_contexts:
+                kleinkram-base: service:base
+
     action_test_file_hash:
         image: rslethz/kleinkram_actions:file-hash-latest
         container_name: kleinkram-action-test-file-hash-test
@@ -23,6 +31,7 @@ services:
             target: production
             additional_contexts:
                 kleinkram-base: service:base
+                kleinkram-builder: service:builder
                 action-test-file-hash: service:action_test_file_hash
         ports:
             - 127.0.0.1:${SERVER_PORT}:${SERVER_PORT}
@@ -111,6 +120,7 @@ services:
                 - GIT_COMMIT=${GIT_COMMIT}
             additional_contexts:
                 kleinkram-base: service:base
+                kleinkram-builder: service:builder
         ports:
             - '8003:8003'
 
@@ -138,6 +148,7 @@ services:
             target: production
             additional_contexts:
                 kleinkram-base: service:base
+                kleinkram-builder: service:builder
         volumes:
             - ./google-service-account.json:/app/queueConsumer/google-service-account.json:ro
         environment:
