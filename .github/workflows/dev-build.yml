@@ -46,6 +46,6 @@ jobs:
               name: push the docker images
               run: |
                   for service in api-server frontend queue-consumer docs migrator db-dumper; do
-                    docker push "registry.direct.merrickcampbell.au/kleinkram:${service}-dev"
+                    # docker push "registry.direct.merrickcampbell.au/kleinkram:${service}-dev"
                     docker push "registry.direct.merrickcampbell.au/kleinkram:${service}-${{ steps.version.outputs.version }}-dev.${{ github.sha }}"
                   done
