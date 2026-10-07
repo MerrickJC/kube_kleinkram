@@ -141,9 +141,16 @@ def _s3_upload(
     callback: Optional[Callable[[int], None]] = None,
 ) -> None:
     # configure boto3
+    # since botocore 1.36, PutObject defaults to streaming a checksum via
+    # "aws-chunked" transfer encoding, which omits Content-Length. many
+    # non-AWS S3-compatible backends (MinIO, SeaweedFS, Ceph, Garage, ...)
+    # reject this with "MissingContentLength", so force checksums back to
+    # opt-in only
     config = botocore.config.Config(
         retries={"max_attempts": S3_MAX_RETRIES},
         read_timeout=S3_READ_TIMEOUT,
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
     )
     client = boto3.client(
         "s3",
