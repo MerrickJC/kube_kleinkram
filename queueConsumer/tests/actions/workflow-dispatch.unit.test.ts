@@ -22,6 +22,7 @@ jest.mock('../../src/logger', () => ({
 
 const mockCreateNamespacedCustomObject = jest.fn();
 const mockCreateNamespacedSecret = jest.fn();
+const mockListNode = jest.fn();
 
 jest.mock('../../src/actions/helper/kube-client', () => {
     const actual = jest.requireActual('../../src/actions/helper/kube-client');
@@ -29,11 +30,31 @@ jest.mock('../../src/actions/helper/kube-client', () => {
         ...actual,
         getCoreV1Api: () => ({
             createNamespacedSecret: mockCreateNamespacedSecret,
+            listNode: mockListNode,
         }),
         getCustomObjectsApi: () => ({
             createNamespacedCustomObject: mockCreateNamespacedCustomObject,
         }),
+        // listCacheTierNodes calls getCoreV1Api() via its own module-local
+        // binding, not through this mock's re-exported property, so it has
+        // to be overridden directly rather than relying on the
+        // getCoreV1Api override above to reach it.
+        listCacheTierNodes: async (labelSelector: string) => {
+            const response = await mockListNode({ labelSelector });
+            return response.items;
+        },
     };
+});
+
+const node = (
+    name: string,
+    labels: Record<string, string> = {},
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any => ({
+    metadata: {
+        name,
+        labels: { 'kubernetes.io/hostname': name, ...labels },
+    },
 });
 
 describe('WorkflowDispatchService', () => {
@@ -111,10 +132,23 @@ describe('WorkflowDispatchService', () => {
 
         mockCreateNamespacedCustomObject.mockResolvedValue({});
         mockCreateNamespacedSecret.mockResolvedValue({});
+        mockListNode.mockResolvedValue({ items: [] });
+    });
+
+    afterEach(() => {
+        delete process.env['LOCALITY_ENABLED'];
+        delete process.env['LOCALITY_NODE_LABEL_SELECTOR'];
+        delete process.env['LOCALITY_GPU_NODE_LABEL_SELECTOR'];
+        delete process.env['LOCALITY_REPLICA_COUNT'];
     });
 
     const job = (uuid: string): Job<{ uuid: string }> =>
         ({ data: { uuid } }) as Job<{ uuid: string }>;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    type ManifestWithAffinity = {
+        spec: { templates: { affinity?: any }[] };
+    };
 
     describe('submit', () => {
         test('skips actions that are not PENDING', async () => {
@@ -285,6 +319,140 @@ describe('WorkflowDispatchService', () => {
                     }),
                 }),
             );
+        });
+    });
+
+    describe('locality affinity', () => {
+        test('adds no affinity when no cache-tier nodes are found', async () => {
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
+                baseAction,
+            );
+            mockListNode.mockResolvedValue({ items: [] });
+
+            await service.submit(job('action-uuid'));
+
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as ManifestWithAffinity;
+            expect(manifest.spec.templates[0].affinity).toBeUndefined();
+        });
+
+        test('adds a single preferred term when only one node is eligible', async () => {
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
+                baseAction,
+            );
+            mockListNode.mockResolvedValue({ items: [node('node-a')] });
+
+            await service.submit(job('action-uuid'));
+
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as ManifestWithAffinity;
+            const terms =
+                manifest.spec.templates[0].affinity.nodeAffinity
+                    .preferredDuringSchedulingIgnoredDuringExecution;
+            expect(terms).toHaveLength(1);
+            expect(terms[0].weight).toBe(100);
+            expect(terms[0].preference.matchExpressions[0].values).toEqual([
+                'node-a',
+            ]);
+        });
+
+        test('adds primary (weight 100) and fallback (weight 50) terms by default with 3+ nodes', async () => {
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
+                baseAction,
+            );
+            mockListNode.mockResolvedValue({
+                items: [node('node-a'), node('node-b'), node('node-c')],
+            });
+
+            await service.submit(job('action-uuid'));
+
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as ManifestWithAffinity;
+            const terms =
+                manifest.spec.templates[0].affinity.nodeAffinity
+                    .preferredDuringSchedulingIgnoredDuringExecution;
+            expect(terms).toHaveLength(2);
+            expect(terms.map((t: { weight: number }) => t.weight)).toEqual([
+                100, 50,
+            ]);
+        });
+
+        test('honors LOCALITY_REPLICA_COUNT to rank more than two nodes', async () => {
+            process.env['LOCALITY_REPLICA_COUNT'] = '3';
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
+                baseAction,
+            );
+            mockListNode.mockResolvedValue({
+                items: [node('node-a'), node('node-b'), node('node-c')],
+            });
+
+            await service.submit(job('action-uuid'));
+
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as ManifestWithAffinity;
+            const terms =
+                manifest.spec.templates[0].affinity.nodeAffinity
+                    .preferredDuringSchedulingIgnoredDuringExecution;
+            expect(terms).toHaveLength(3);
+            expect(terms.map((t: { weight: number }) => t.weight)).toEqual([
+                100, 50, 25,
+            ]);
+        });
+
+        test('ranks only GPU-labeled nodes for a GPU action', async () => {
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue({
+                ...baseAction,
+                template: { ...template, gpuMemory: 8 },
+            });
+            mockListNode.mockResolvedValue({
+                items: [
+                    node('cpu-node-a'),
+                    node('gpu-node-a', { gpu: 'true' }),
+                ],
+            });
+
+            await service.submit(job('action-uuid'));
+
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as ManifestWithAffinity;
+            const terms =
+                manifest.spec.templates[0].affinity.nodeAffinity
+                    .preferredDuringSchedulingIgnoredDuringExecution;
+            expect(terms).toHaveLength(1);
+            expect(terms[0].preference.matchExpressions[0].values).toEqual([
+                'gpu-node-a',
+            ]);
+        });
+
+        test('adds no affinity when locality is disabled', async () => {
+            process.env['LOCALITY_ENABLED'] = 'false';
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
+                baseAction,
+            );
+            mockListNode.mockResolvedValue({
+                items: [node('node-a'), node('node-b')],
+            });
+
+            await service.submit(job('action-uuid'));
+
+            expect(mockListNode).not.toHaveBeenCalled();
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as ManifestWithAffinity;
+            expect(manifest.spec.templates[0].affinity).toBeUndefined();
+        });
+
+        test('submits the workflow with no affinity when the node list fetch fails', async () => {
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
+                baseAction,
+            );
+            mockListNode.mockRejectedValue(new Error('API unreachable'));
+
+            await service.submit(job('action-uuid'));
+
+            expect(mockCreateNamespacedCustomObject).toHaveBeenCalledTimes(1);
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as ManifestWithAffinity;
+            expect(manifest.spec.templates[0].affinity).toBeUndefined();
         });
     });
 

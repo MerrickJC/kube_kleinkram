@@ -19,6 +19,17 @@ export function getCustomObjectsApi(): k8s.CustomObjectsApi {
     return getKubeConfig().makeApiClient(k8s.CustomObjectsApi);
 }
 
+/**
+ * Lists nodes matching `labelSelector`, e.g. the cache-tier label a cluster
+ * operator applies to nodes running a node-local JuiceFS gateway
+ */
+export async function listCacheTierNodes(
+    labelSelector: string,
+): Promise<k8s.V1Node[]> {
+    const response = await getCoreV1Api().listNode({ labelSelector });
+    return response.items;
+}
+
 export const ARGO_GROUP = 'argoproj.io';
 export const ARGO_VERSION = 'v1alpha1';
 export const WORKFLOW_PLURAL = 'workflows';
@@ -58,3 +69,27 @@ export const ACTION_MANAGED_BY_LABEL_KEY = 'app.kubernetes.io/managed-by';
 export const ACTION_MANAGED_BY_LABEL_VALUE = 'kleinkram-action-operator';
 export const ACTION_MANAGED_BY_LABEL_SELECTOR = `${ACTION_MANAGED_BY_LABEL_KEY}=${ACTION_MANAGED_BY_LABEL_VALUE}`;
 export const ACTION_UUID_LABEL = 'kleinkram.local/action-uuid';
+
+// Locality-aware scheduling: soft node affinity toward whichever node's
+// local JuiceFS gateway already caches a mission's data. "No eligible
+// nodes found" is already safe, but this flag gives an explicit off switch
+export function localityEnabled(): boolean {
+    return (process.env.LOCALITY_ENABLED ?? 'true') === 'true';
+}
+
+export function localityNodeLabelSelector(): string {
+    return process.env.LOCALITY_NODE_LABEL_SELECTOR ?? 'cache-tier=true';
+}
+
+// Match whatever label the deployment's GPU Kueue ResourceFlavor
+// actually selects on (helm/kleinkram/values.yaml's
+// kueue.resourceFlavors.gpu.nodeSelector)
+export function localityGpuNodeLabelSelector(): string {
+    return process.env.LOCALITY_GPU_NODE_LABEL_SELECTOR ?? 'gpu=true';
+}
+
+// Number of ranked nodes to give a weighted affinity preference to
+export function localityReplicaCount(): number {
+    const raw = Number.parseInt(process.env.LOCALITY_REPLICA_COUNT ?? '2', 10);
+    return Number.isNaN(raw) || raw < 1 ? 2 : raw;
+}

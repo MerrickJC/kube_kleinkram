@@ -314,6 +314,25 @@ kueue:
   priorityClasses:
     enabled: true
 
+# Locality-scheduled S3 cache: soft node-affinity hint toward whichever
+# node's local JuiceFS gateway already caches an Action's mission data.
+# None of the gateway/cache infrastructure itself is deployed by this chart
+# this only tells the Action Operator which node labels to look for and how
+# many ranked nodes to prefer.
+locality:
+  enabled: true
+  # Must match the label applied   # to nodes running a node-local JuiceFS
+  # gateway with a cache disk
+  nodeLabelSelector: 'cache-tier=true'
+  # Must match kueue.resourceFlavors.gpu.nodeSelector above, so a GPU
+  # action's affinity hint is only ever pointed at nodes it can actually
+  # schedule onto. Keep these two in sync if you change the GPU node label.
+  gpuNodeLabelSelector: 'gpu=true'
+  # Number of ranked nodes to give a weighted affinity preference to.
+  # Higher values add resilience if top-ranked nodes are often full, at the
+  # cost of diluting cache concentration
+  replicaCount: 2
+
 argo:
   artifactRepository:
     configMapName: kleinkram-artifact-repository

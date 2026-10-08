@@ -39,6 +39,12 @@ data:
   ARGO_ARTIFACT_REPOSITORY_CONFIGMAP: {{ .Values.queueConsumer.argoArtifactRepositoryConfigMap | quote }}
   ACTION_POD_SERVICE_ACCOUNT: {{ .Values.actions.serviceAccountName | quote }}
   ACTION_EXECUTOR_SERVICE_ACCOUNT: {{ .Values.actions.executorServiceAccountName | quote }}
+  # Node labeling and the gateway/cache infrastructure itself are external
+  # this only configures how the Action Operator looks them up
+  LOCALITY_ENABLED: {{ .Values.locality.enabled | quote }}
+  LOCALITY_NODE_LABEL_SELECTOR: {{ .Values.locality.nodeLabelSelector | quote }}
+  LOCALITY_GPU_NODE_LABEL_SELECTOR: {{ .Values.locality.gpuNodeLabelSelector | quote }}
+  LOCALITY_REPLICA_COUNT: {{ .Values.locality.replicaCount | quote }}
   {{- if .Values.observability.prometheusUrl }}
   PROMETHEUS_URL: {{ .Values.observability.prometheusUrl | quote }}
   {{- end }}

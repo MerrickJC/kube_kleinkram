@@ -14,6 +14,7 @@ import {
     KeyTypes,
     UserRole,
 } from '@kleinkram/shared';
+import type { V1Node } from '@kubernetes/client-node';
 import { OnQueueFailed, Process, Processor } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -33,10 +34,20 @@ import {
     ARGO_VERSION,
     getCoreV1Api,
     getCustomObjectsApi,
+    listCacheTierNodes,
+    localityEnabled,
+    localityGpuNodeLabelSelector,
+    localityNodeLabelSelector,
+    localityReplicaCount,
     WORKFLOW_PLURAL,
     workflowNameForAction,
 } from '../helper/kube-client';
+import { rankNodes } from '../helper/rendezvous-hash';
 import { ImageResolutionService } from './image-resolution.service';
+
+// Cluster membership is assumed stable on the order of minutes, so this just
+// avoids a Kubernetes API round-trip on every single dispatch.
+const NODE_LIST_CACHE_TTL_MS = 30_000;
 
 const KUEUE_LOCAL_QUEUE = process.env.KUEUE_LOCAL_QUEUE ?? 'kleinkram-actions';
 const ARTIFACT_REPOSITORY_CONFIGMAP =
@@ -57,6 +68,8 @@ const OUTPUT_VOLUME_SIZE_LIMIT =
 @Processor(ACTION_DISPATCH_QUEUE_NAME)
 @Injectable()
 export class WorkflowDispatchService {
+    private nodeCache: { nodes: V1Node[]; expiresAt: number } | undefined;
+
     constructor(
         @InjectRepository(ActionEntity)
         private actionRepository: Repository<ActionEntity>,
@@ -113,7 +126,7 @@ export class WorkflowDispatchService {
         );
 
         const workflowName = workflowNameForAction(action.uuid);
-        const manifest = this.buildWorkflowManifest(
+        const manifest = await this.buildWorkflowManifest(
             action,
             action.template,
             workflowName,
@@ -203,12 +216,98 @@ export class WorkflowDispatchService {
         return new DisposableAPIKey(saved, this.apikeyRepository);
     }
 
-    private buildWorkflowManifest(
+    /**
+     * Returns the cache-tier node list (nodes matching
+     * `localityNodeLabelSelector()`), refetching only after
+     * NODE_LIST_CACHE_TTL_MS has elapsed since the last successful fetch.
+     */
+    private async getCacheTierNodes(): Promise<V1Node[]> {
+        const now = Date.now();
+        if (this.nodeCache && this.nodeCache.expiresAt > now) {
+            return this.nodeCache.nodes;
+        }
+        const nodes = await listCacheTierNodes(localityNodeLabelSelector());
+        this.nodeCache = { nodes, expiresAt: now + NODE_LIST_CACHE_TTL_MS };
+        return nodes;
+    }
+
+    /**
+     * Builds a soft node-affinity hint toward whichever cache-tier node(s)
+     * rendezvous-hash to `missionUuid`, so a pod is likely to land where its
+     * mission's data is already cached by a node-local JuiceFS gateway.
+     *
+     * Returns undefined on any error, disablement, or when no eligible
+     * node is found (no affinity added, workflow dispatches as if this
+     * feature didn't exist)
+     */
+    private async buildLocalityAffinity(
+        missionUuid: string,
+        wantsGpu: boolean,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ): Promise<Record<string, any> | undefined> {
+        if (!localityEnabled()) return undefined;
+
+        let nodes: V1Node[];
+        try {
+            nodes = await this.getCacheTierNodes();
+        } catch (error) {
+            logger.warn(
+                `Failed to list cache-tier nodes, skipping locality affinity: ${String(error)}`,
+            );
+            return undefined;
+        }
+
+        const eligible = wantsGpu
+            ? nodes.filter((node) => {
+                  const selector = localityGpuNodeLabelSelector();
+                  const eqIndex = selector.indexOf('=');
+                  const gpuLabelKey =
+                      eqIndex === -1 ? selector : selector.slice(0, eqIndex);
+                  const gpuLabelValue =
+                      eqIndex === -1 ? '' : selector.slice(eqIndex + 1);
+                  return node.metadata?.labels?.[gpuLabelKey] === gpuLabelValue;
+              })
+            : nodes;
+
+        const nodeNames = eligible
+            .map(
+                (node) =>
+                    node.metadata?.labels?.['kubernetes.io/hostname'] ??
+                    node.metadata?.name,
+            )
+            .filter((name): name is string => Boolean(name));
+
+        if (nodeNames.length === 0) return undefined;
+
+        const ranked = rankNodes(missionUuid, nodeNames);
+        const top = ranked.slice(0, localityReplicaCount());
+
+        return {
+            nodeAffinity: {
+                preferredDuringSchedulingIgnoredDuringExecution: top.map(
+                    (nodeName, rank) => ({
+                        weight: Math.max(1, Math.floor(100 / 2 ** rank)),
+                        preference: {
+                            matchExpressions: [
+                                {
+                                    key: 'kubernetes.io/hostname',
+                                    operator: 'In',
+                                    values: [nodeName],
+                                },
+                            ],
+                        },
+                    }),
+                ),
+            },
+        };
+    }
+
+    private async buildWorkflowManifest(
         action: ActionEntity,
         template: ActionTemplateEntity,
         workflowName: string,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ): Record<string, any> {
+    ): Promise<Record<string, any>> {
         if (!action.mission) throw new Error('Mission is undefined');
 
         const activeDeadlineSeconds = Math.max(
@@ -216,6 +315,10 @@ export class WorkflowDispatchService {
             Math.round(template.maxRuntime * 3600),
         );
         const wantsGpu = template.gpuMemory > 0;
+        const affinity = await this.buildLocalityAffinity(
+            action.mission.uuid,
+            wantsGpu,
+        );
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const resources: Record<string, Record<string, any>> = {
@@ -311,6 +414,7 @@ export class WorkflowDispatchService {
                 templates: [
                     {
                         name: 'run-action',
+                        ...(affinity ? { affinity } : {}),
                         container,
                         volumes: [
                             {
@@ -321,7 +425,18 @@ export class WorkflowDispatchService {
                             },
                         ],
                         outputs: {
-                            artifacts: [{ name: 'results', path: '/out' }],
+                            artifacts: [
+                                {
+                                    name: 'results',
+                                    path: '/out',
+                                    archive: {
+                                        none: {},
+                                    },
+                                    s3: {
+                                        key: action.uuid,
+                                    },
+                                },
+                            ],
                         },
                     },
                 ],
