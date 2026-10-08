@@ -1,0 +1,13 @@
+{{- if .Values.locality.enabled }}
+# Needed for locality-aware node affinity
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kleinkram-action-operator-nodes
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ['']
+    resources: ['nodes']
+    verbs: ['get', 'list', 'watch']
+{{- end }}
