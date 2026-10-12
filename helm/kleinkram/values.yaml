@@ -286,6 +286,9 @@ kueue:
       name: cpu-default
       # No node selector by default means pods can bind to any node. Adjust as needed
       nodeSelector: {}
+      # No tolerations by default. Set these if CPU action pods need to schedule
+      # onto tainted nodes (e.g. a dedicated action node pool)
+      tolerations: []
     gpu:
       name: gpu-default
       # Must match the node label applied to the GPU node pool, and the NVIDIA device

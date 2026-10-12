@@ -9,3 +9,7 @@ spec:
   nodeLabels:
     {{- toYaml .Values.kueue.resourceFlavors.cpu.nodeSelector | nindent 4 }}
   {{- end }}
+  {{- if .Values.kueue.resourceFlavors.cpu.tolerations }}
+  tolerations:
+    {{- toYaml .Values.kueue.resourceFlavors.cpu.tolerations | nindent 4 }}
+  {{- end }}
