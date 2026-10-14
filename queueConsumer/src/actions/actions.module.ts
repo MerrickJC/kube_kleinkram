@@ -7,6 +7,7 @@ import { ACTION_DISPATCH_QUEUE_NAME } from '@kleinkram/backend-common/modules/ac
 import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ACTION_METRIC_PROVIDERS } from './actions.metrics';
 import { ActionErrorHintService } from './services/action-error-hint.service';
 import { ArtifactStatusService } from './services/artifact-status.service';
 import { ImageResolutionService } from './services/image-resolution.service';
@@ -36,6 +37,7 @@ import { WorkflowWatchService } from './services/workflow-watch.service';
         ResourceUsageService,
         ImageResolutionService,
         ActionErrorHintService,
+        ...ACTION_METRIC_PROVIDERS,
     ],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
