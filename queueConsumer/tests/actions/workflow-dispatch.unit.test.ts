@@ -508,6 +508,21 @@ describe('WorkflowDispatchService', () => {
                 'tier-cache-any',
             ]);
 
+            // Each step's `when` must AND together every earlier tier's
+            // status, not just the immediately preceding one - otherwise,
+            // once tier-0 succeeds, tier-1 is Skipped (not Succeeded), and
+            // tier-2's `when` would see "previous != Succeeded" as true and
+            // run anyway even though the action already succeeded.
+            expect(main?.steps?.[1]?.[0]?.when).toBe(
+                '{{steps.tier-0.status}} != Succeeded',
+            );
+            expect(main?.steps?.[2]?.[0]?.when).toBe(
+                '{{steps.tier-0.status}} != Succeeded && {{steps.tier-1.status}} != Succeeded',
+            );
+            expect(main?.steps?.[3]?.[0]?.when).toBe(
+                '{{steps.tier-0.status}} != Succeeded && {{steps.tier-1.status}} != Succeeded && {{steps.tier-2.status}} != Succeeded',
+            );
+
             expect(
                 patchMatchExpressions(
                     findTemplate(manifest, 'run-action-tier-0'),

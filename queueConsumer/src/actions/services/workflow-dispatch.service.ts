@@ -380,6 +380,21 @@ export class WorkflowDispatchService {
         });
     }
 
+    /**
+     * Builds a `when` expression gating a step on *none* of `stepNames`
+     * having succeeded - not just the immediately preceding one. A skipped
+     * step's status is `Skipped`, not `Succeeded`, so chaining only off the
+     * previous step (`{{steps.tier-N.status}} != Succeeded`) breaks as soon
+     * as one step is skipped: every later step would see a non-Succeeded
+     * predecessor and run anyway, even after an earlier tier already
+     * succeeded. ANDing every prior step's condition avoids that.
+     */
+    private noneSucceededCondition(stepNames: string[]): string {
+        return stepNames
+            .map((name) => `{{steps.${name}.status}} != Succeeded`)
+            .join(' && ');
+    }
+
     private async buildWorkflowManifest(
         action: ActionEntity,
         template: ActionTemplateEntity,
@@ -565,6 +580,7 @@ export class WorkflowDispatchService {
         const templates: Record<string, any>[] = [];
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const steps: Record<string, any>[][] = [];
+        const previousStepNames: string[] = [];
 
         for (const [index, tierNodes] of tiers.strictTiers.entries()) {
             const stepName = `tier-${index.toString()}`;
@@ -594,13 +610,12 @@ export class WorkflowDispatchService {
                     name: stepName,
                     template: templateName,
                     continueOn: { error: true, failed: true },
-                    ...(index > 0
-                        ? {
-                              when: `{{steps.tier-${(index - 1).toString()}.status}} != Succeeded`,
-                          }
+                    ...(previousStepNames.length > 0
+                        ? { when: this.noneSucceededCondition(previousStepNames) }
                         : {}),
                 },
             ]);
+            previousStepNames.push(stepName);
         }
 
         templates.push({
@@ -621,7 +636,7 @@ export class WorkflowDispatchService {
             {
                 name: 'tier-cache-any',
                 template: 'run-action-tier-cache-any',
-                when: `{{steps.tier-${(tiers.strictTiers.length - 1).toString()}.status}} != Succeeded`,
+                when: this.noneSucceededCondition(previousStepNames),
             },
         ]);
 
