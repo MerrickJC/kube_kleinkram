@@ -10,7 +10,7 @@ Kleinkram can be deployed to a Kubernetes cluster via the Helm chart at [`helm/k
 This chart only deploys Kleinkram's own application resources and the namespace-scoped objects that bind it to cluster infrastructure. There are a number of applications which are assumed to have be installed and configured outside of the helm chart. This is mainly because they represent large applications with application lifecycles independent of just this chart. The following are assumed to already be installed and configured:
 
 - A Kubernetes cluster (development was done against K3s with Traefik as the ingress controller)
-- [Kueue](https://kueue.sigs.k8s.io/) (controller + CRDs). The chart creates Kleinkram-specific `ResourceFlavor`/`ClusterQueue`/`LocalQueue` objects, but doesn't deploy Kueue itself
+- [Kueue](https://kueue.sigs.k8s.io/) (controller + CRDs). The chart creates Kleinkram-specific `ResourceFlavor`/`ClusterQueue`/`LocalQueue` objects, but doesn't deploy Kueue itself, and doesn't configure the controller-manager-level `waitForPodsReady` setting that node-locality scheduling depends on - see [Node-locality scheduling for Actions](#node-locality-scheduling-for-actions) below
 - [Argo Workflows](https://argoproj.github.io/argo-workflows/) (workflow controller, and the Argo Server if you want its UI). The chart only configures the S3 artifact-repository the Argo workflows use
 - Postgres reachable from the cluster, with non-secret connection details (host, port, database) provided via `values.yaml`
 - An S3-compatible store (SeaweedFS in the reference stack), reachable from the cluster, with non-secret connection details (host, port, bucket names) provided via `values.yaml`
@@ -32,6 +32,36 @@ This chart only deploys Kleinkram's own application resources and the namespace-
 - A `NetworkPolicy` restricting Action pod egress, and an optional Kyverno `ClusterPolicy` restricting which image registries Action images can be pulled from
 
 The chart's values.yaml contains the full set of configurable values, some of which are required to work correctly and will not work with default values.
+
+## Node-locality scheduling for Actions
+
+Action pods carry a required, tiered node affinity toward whichever node's local JuiceFS gateway already caches the mission's data (see `queueConsumer/src/actions/services/workflow-dispatch.service.ts`): an Action run is submitted as a strict step targeting its single best-ranked cache-tier node, widening to the top 2, then top 4, then any node still labeled with `locality.nodeLabelSelector` (default `cache-tier=true`) if those stay unschedulable. Every tier also carries the same weighted preference across its allowed nodes on top of that hard requirement, so if several of a tier's nodes happen to free up at once (e.g. the top 2 and top 4 nodes all become schedulable together), the best-ranked one among them still wins rather than the scheduler picking arbitrarily. A pod never spills onto nodes outside the cache-tier pool - core Kleinkram/cluster services aren't competed with - so if the cache-tier pool itself is full, the final tier waits and retries there rather than running anywhere else.
+
+This only works end-to-end if the cluster's Kueue installation has `waitForPodsReady` configured, since that's what evicts a pod stuck on an unschedulable tier so Argo can retry it into the next one. **This chart does not configure this** (see [Prerequisites](#prerequisites)) - it's a property of the externally-managed Kueue controller-manager, not a namespace-scoped object this chart owns. Apply something equivalent to the following to that installation's configuration (exact mechanism depends on your Kueue version - see the [Kueue docs](https://kueue.sigs.k8s.io/docs/tasks/manage/setup_wait_for_pods_ready/)):
+
+```yaml
+waitForPodsReady:
+  enable: true
+  timeout: 3m             # start around cold image-pull + container-start time; this is
+                           # measured from Workload admission and includes the pull, so too
+                           # short a value widens tiers for no reason
+  recoveryTimeout: 0s      # don't evict a pod that was Ready and later becomes not Ready
+  blockAdmission: false    # true would admit only one workload at a time cluster-wide
+```
+
+Also confirm the plain-`pod` integration's `managedJobsNamespaceSelector` covers the `kleinkram-actions` namespace (the only namespace Action pods run in) - otherwise Kueue never applies `waitForPodsReady` to them at all.
+
+**Quota must reflect real cluster capacity.** Kueue only enforces quota against the `ClusterQueue`'s `nominalQuota` (`values.yaml`'s `kueue.quota`); it has no visibility into per-node fit. If quota is set higher than the cluster can actually run, excess pods go `Pending` in the scheduler instead of waiting gated in Kueue - and a pod stuck in the scheduler is invisible to `waitForPodsReady`, so it never gets evicted/retried into a wider tier. Size each covered resource as:
+
+```
+nominalQuota ≈ sum(node.status.allocatable[resource] for nodes the ResourceFlavor's nodeSelector matches)
+               - sum(DaemonSet pod requests on those nodes)
+               - headroom margin (e.g. 10-20%)
+```
+
+Re-measure and update `values.yaml`'s `kueue.quota` whenever nodes are added to or removed from the pool(s) each `ResourceFlavor` selects.
+
+**Action containers should be idempotent.** A genuine Action failure (bad download, non-zero exit) doesn't end a tier step in `Succeeded` any more than a Kueue eviction does, so it also widens through the remaining tiers before the run is finally reported as failed - up to one attempt per configured tier plus the fallback's retries. Don't rely on an Action running exactly once.
 
 ## Secrets
 

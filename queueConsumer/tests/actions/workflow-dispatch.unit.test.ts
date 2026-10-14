@@ -55,6 +55,8 @@ const node = (
         name,
         labels: { 'kubernetes.io/hostname': name, ...labels },
     },
+    spec: { unschedulable: false },
+    status: { conditions: [{ type: 'Ready', status: 'True' }] },
 });
 
 describe('WorkflowDispatchService', () => {
@@ -139,15 +141,87 @@ describe('WorkflowDispatchService', () => {
         delete process.env['LOCALITY_ENABLED'];
         delete process.env['LOCALITY_NODE_LABEL_SELECTOR'];
         delete process.env['LOCALITY_GPU_NODE_LABEL_SELECTOR'];
-        delete process.env['LOCALITY_REPLICA_COUNT'];
+        delete process.env['LOCALITY_TIER_SIZES'];
+        delete process.env['LOCALITY_FALLBACK_RETRY_LIMIT'];
     });
 
     const job = (uuid: string): Job<{ uuid: string }> =>
         ({ data: { uuid } }) as Job<{ uuid: string }>;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    type ManifestWithAffinity = {
-        spec: { templates: { affinity?: any }[] };
+    interface ManifestTemplate {
+        name: string;
+        podSpecPatch?: string;
+        retryStrategy?: { limit: number; retryPolicy: string };
+        steps?: {
+            name: string;
+            template: string;
+            when?: string;
+            continueOn?: { error: boolean; failed: boolean };
+        }[][];
+        container?: {
+            resources: {
+                requests: Record<string, string>;
+                limits: Record<string, string>;
+            };
+        };
+    }
+
+    interface Manifest {
+        spec: { entrypoint: string; templates: ManifestTemplate[] };
+    }
+
+    interface MatchExpression {
+        key: string;
+        operator: string;
+        values: string[];
+    }
+
+    const findTemplate = (
+        manifest: Manifest,
+        name: string,
+    ): ManifestTemplate | undefined =>
+        manifest.spec.templates.find((t) => t.name === name);
+
+    const patchMatchExpressions = (
+        template: ManifestTemplate | undefined,
+    ): MatchExpression[] => {
+        const patch = JSON.parse(template?.podSpecPatch ?? '{}') as {
+            affinity?: {
+                nodeAffinity?: {
+                    requiredDuringSchedulingIgnoredDuringExecution?: {
+                        nodeSelectorTerms: {
+                            matchExpressions: MatchExpression[];
+                        }[];
+                    };
+                };
+            };
+        };
+        return (
+            patch.affinity?.nodeAffinity
+                ?.requiredDuringSchedulingIgnoredDuringExecution
+                ?.nodeSelectorTerms[0]?.matchExpressions ?? []
+        );
+    };
+
+    interface PreferredTerm {
+        weight: number;
+        preference: { matchExpressions: MatchExpression[] };
+    }
+
+    const patchPreferredTerms = (
+        template: ManifestTemplate | undefined,
+    ): PreferredTerm[] => {
+        const patch = JSON.parse(template?.podSpecPatch ?? '{}') as {
+            affinity?: {
+                nodeAffinity?: {
+                    preferredDuringSchedulingIgnoredDuringExecution?: PreferredTerm[];
+                };
+            };
+        };
+        return (
+            patch.affinity?.nodeAffinity
+                ?.preferredDuringSchedulingIgnoredDuringExecution ?? []
+        );
     };
 
     describe('submit', () => {
@@ -322,8 +396,8 @@ describe('WorkflowDispatchService', () => {
         });
     });
 
-    describe('locality affinity', () => {
-        test('adds no affinity when no cache-tier nodes are found', async () => {
+    describe('locality tiers', () => {
+        test('dispatches a single unconstrained template when no cache-tier nodes are found', async () => {
             (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
                 baseAction,
             );
@@ -332,11 +406,13 @@ describe('WorkflowDispatchService', () => {
             await service.submit(job('action-uuid'));
 
             const [call] = mockCreateNamespacedCustomObject.mock.calls;
-            const manifest = call[0].body as ManifestWithAffinity;
-            expect(manifest.spec.templates[0].affinity).toBeUndefined();
+            const manifest = call[0].body as Manifest;
+            expect(manifest.spec.entrypoint).toBe('run-action');
+            expect(manifest.spec.templates).toHaveLength(1);
+            expect(manifest.spec.templates[0]?.podSpecPatch).toBeUndefined();
         });
 
-        test('adds a single preferred term when only one node is eligible', async () => {
+        test('builds a single strict tier plus a cache-any fallback when only one node is eligible', async () => {
             (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
                 baseAction,
             );
@@ -345,18 +421,137 @@ describe('WorkflowDispatchService', () => {
             await service.submit(job('action-uuid'));
 
             const [call] = mockCreateNamespacedCustomObject.mock.calls;
-            const manifest = call[0].body as ManifestWithAffinity;
-            const terms =
-                manifest.spec.templates[0].affinity.nodeAffinity
-                    .preferredDuringSchedulingIgnoredDuringExecution;
-            expect(terms).toHaveLength(1);
-            expect(terms[0].weight).toBe(100);
-            expect(terms[0].preference.matchExpressions[0].values).toEqual([
-                'node-a',
+            const manifest = call[0].body as Manifest;
+            expect(manifest.spec.entrypoint).toBe('main');
+
+            const main = findTemplate(manifest, 'main');
+            expect(main?.steps).toHaveLength(2);
+            expect(main?.steps?.[0]?.[0]).toMatchObject({
+                name: 'tier-0',
+                template: 'run-action-tier-0',
+                continueOn: { error: true, failed: true },
+            });
+            expect(main?.steps?.[1]?.[0]).toMatchObject({
+                name: 'tier-cache-any',
+                template: 'run-action-tier-cache-any',
+                when: '{{steps.tier-0.status}} != Succeeded',
+            });
+
+            const tier0 = findTemplate(manifest, 'run-action-tier-0');
+            expect(patchMatchExpressions(tier0)).toEqual([
+                {
+                    key: 'kubernetes.io/hostname',
+                    operator: 'In',
+                    values: ['node-a'],
+                },
             ]);
+
+            const fallback = findTemplate(
+                manifest,
+                'run-action-tier-cache-any',
+            );
+            expect(patchMatchExpressions(fallback)).toEqual([
+                { key: 'cache-tier', operator: 'In', values: ['true'] },
+            ]);
+            expect(fallback?.retryStrategy).toEqual({
+                limit: 20,
+                retryPolicy: 'Always',
+            });
+
+            // The required constraint narrows candidates per tier, but the
+            // same weighted preference is layered on every tier (including
+            // the fallback) so a free, better-ranked node is still favored
+            // among whatever that tier allows.
+            const expectedPreferred = [
+                {
+                    weight: 100,
+                    preference: {
+                        matchExpressions: [
+                            {
+                                key: 'kubernetes.io/hostname',
+                                operator: 'In',
+                                values: ['node-a'],
+                            },
+                        ],
+                    },
+                },
+            ];
+            expect(patchPreferredTerms(tier0)).toEqual(expectedPreferred);
+            expect(patchPreferredTerms(fallback)).toEqual(expectedPreferred);
         });
 
-        test('adds primary (weight 100) and fallback (weight 50) terms by default with 3+ nodes', async () => {
+        test('widens through top-1, top-2 and top-4 strict tiers before the cache-any fallback with 5+ nodes', async () => {
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
+                baseAction,
+            );
+            mockListNode.mockResolvedValue({
+                items: [
+                    node('node-a'),
+                    node('node-b'),
+                    node('node-c'),
+                    node('node-d'),
+                    node('node-e'),
+                ],
+            });
+
+            await service.submit(job('action-uuid'));
+
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as Manifest;
+
+            const main = findTemplate(manifest, 'main');
+            expect(main?.steps).toHaveLength(4);
+            expect(main?.steps?.map((s) => s[0]?.name)).toEqual([
+                'tier-0',
+                'tier-1',
+                'tier-2',
+                'tier-cache-any',
+            ]);
+
+            expect(
+                patchMatchExpressions(
+                    findTemplate(manifest, 'run-action-tier-0'),
+                )[0]?.values,
+            ).toHaveLength(1);
+            expect(
+                patchMatchExpressions(
+                    findTemplate(manifest, 'run-action-tier-1'),
+                )[0]?.values,
+            ).toHaveLength(2);
+            expect(
+                patchMatchExpressions(
+                    findTemplate(manifest, 'run-action-tier-2'),
+                )[0]?.values,
+            ).toHaveLength(4);
+
+            // Preferred weights halve per rank (100, 50, 25, 12 after
+            // flooring) and are capped at the largest configured tier size
+            // (4 by default), rather than weighting all 5 eligible nodes
+            const tier0Preferred = patchPreferredTerms(
+                findTemplate(manifest, 'run-action-tier-0'),
+            );
+            expect(tier0Preferred.map((t) => t.weight)).toEqual([
+                100, 50, 25, 12,
+            ]);
+
+            // The exact same shared ranking is layered onto every tier,
+            // including ones whose required constraint only allows a
+            // subset of it, and onto the cache-any fallback
+            expect(
+                patchPreferredTerms(findTemplate(manifest, 'run-action-tier-1')),
+            ).toEqual(tier0Preferred);
+            expect(
+                patchPreferredTerms(findTemplate(manifest, 'run-action-tier-2')),
+            ).toEqual(tier0Preferred);
+            expect(
+                patchPreferredTerms(
+                    findTemplate(manifest, 'run-action-tier-cache-any'),
+                ),
+            ).toEqual(tier0Preferred);
+        });
+
+        test('honors LOCALITY_TIER_SIZES to customize strict tier sizes', async () => {
+            process.env['LOCALITY_TIER_SIZES'] = '1,3';
             (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
                 baseAction,
             );
@@ -367,39 +562,23 @@ describe('WorkflowDispatchService', () => {
             await service.submit(job('action-uuid'));
 
             const [call] = mockCreateNamespacedCustomObject.mock.calls;
-            const manifest = call[0].body as ManifestWithAffinity;
-            const terms =
-                manifest.spec.templates[0].affinity.nodeAffinity
-                    .preferredDuringSchedulingIgnoredDuringExecution;
-            expect(terms).toHaveLength(2);
-            expect(terms.map((t: { weight: number }) => t.weight)).toEqual([
-                100, 50,
-            ]);
+            const manifest = call[0].body as Manifest;
+
+            const main = findTemplate(manifest, 'main');
+            expect(main?.steps).toHaveLength(3);
+            expect(
+                patchMatchExpressions(
+                    findTemplate(manifest, 'run-action-tier-0'),
+                )[0]?.values,
+            ).toHaveLength(1);
+            expect(
+                patchMatchExpressions(
+                    findTemplate(manifest, 'run-action-tier-1'),
+                )[0]?.values,
+            ).toHaveLength(3);
         });
 
-        test('honors LOCALITY_REPLICA_COUNT to rank more than two nodes', async () => {
-            process.env['LOCALITY_REPLICA_COUNT'] = '3';
-            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
-                baseAction,
-            );
-            mockListNode.mockResolvedValue({
-                items: [node('node-a'), node('node-b'), node('node-c')],
-            });
-
-            await service.submit(job('action-uuid'));
-
-            const [call] = mockCreateNamespacedCustomObject.mock.calls;
-            const manifest = call[0].body as ManifestWithAffinity;
-            const terms =
-                manifest.spec.templates[0].affinity.nodeAffinity
-                    .preferredDuringSchedulingIgnoredDuringExecution;
-            expect(terms).toHaveLength(3);
-            expect(terms.map((t: { weight: number }) => t.weight)).toEqual([
-                100, 50, 25,
-            ]);
-        });
-
-        test('ranks only GPU-labeled nodes for a GPU action', async () => {
+        test('ranks only GPU-labeled nodes for a GPU action and ANDs the GPU selector into the fallback tier', async () => {
             (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue({
                 ...baseAction,
                 template: { ...template, gpuMemory: 8 },
@@ -414,17 +593,78 @@ describe('WorkflowDispatchService', () => {
             await service.submit(job('action-uuid'));
 
             const [call] = mockCreateNamespacedCustomObject.mock.calls;
-            const manifest = call[0].body as ManifestWithAffinity;
-            const terms =
-                manifest.spec.templates[0].affinity.nodeAffinity
-                    .preferredDuringSchedulingIgnoredDuringExecution;
-            expect(terms).toHaveLength(1);
-            expect(terms[0].preference.matchExpressions[0].values).toEqual([
-                'gpu-node-a',
+            const manifest = call[0].body as Manifest;
+
+            expect(
+                patchMatchExpressions(
+                    findTemplate(manifest, 'run-action-tier-0'),
+                )[0]?.values,
+            ).toEqual(['gpu-node-a']);
+
+            expect(
+                patchMatchExpressions(
+                    findTemplate(manifest, 'run-action-tier-cache-any'),
+                ),
+            ).toEqual([
+                { key: 'cache-tier', operator: 'In', values: ['true'] },
+                { key: 'gpu', operator: 'In', values: ['true'] },
             ]);
         });
 
-        test('adds no affinity when locality is disabled', async () => {
+        test('falls back to no affinity when a GPU action has no eligible GPU-labeled cache-tier node', async () => {
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue({
+                ...baseAction,
+                template: { ...template, gpuMemory: 8 },
+            });
+            mockListNode.mockResolvedValue({ items: [node('cpu-node-a')] });
+
+            await service.submit(job('action-uuid'));
+
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as Manifest;
+            expect(manifest.spec.entrypoint).toBe('run-action');
+            expect(manifest.spec.templates[0]?.podSpecPatch).toBeUndefined();
+        });
+
+        test('excludes cordoned and not-Ready nodes from ranking', async () => {
+            (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
+                baseAction,
+            );
+            mockListNode.mockResolvedValue({
+                items: [
+                    {
+                        ...node('unschedulable-node'),
+                        spec: { unschedulable: true },
+                    },
+                    {
+                        ...node('not-ready-node'),
+                        status: {
+                            conditions: [
+                                { type: 'Ready', status: 'False' },
+                            ],
+                        },
+                    },
+                    {
+                        ...node('healthy-node'),
+                        status: {
+                            conditions: [{ type: 'Ready', status: 'True' }],
+                        },
+                    },
+                ],
+            });
+
+            await service.submit(job('action-uuid'));
+
+            const [call] = mockCreateNamespacedCustomObject.mock.calls;
+            const manifest = call[0].body as Manifest;
+            expect(
+                patchMatchExpressions(
+                    findTemplate(manifest, 'run-action-tier-0'),
+                )[0]?.values,
+            ).toEqual(['healthy-node']);
+        });
+
+        test('dispatches a single unconstrained template when locality is disabled', async () => {
             process.env['LOCALITY_ENABLED'] = 'false';
             (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
                 baseAction,
@@ -437,11 +677,12 @@ describe('WorkflowDispatchService', () => {
 
             expect(mockListNode).not.toHaveBeenCalled();
             const [call] = mockCreateNamespacedCustomObject.mock.calls;
-            const manifest = call[0].body as ManifestWithAffinity;
-            expect(manifest.spec.templates[0].affinity).toBeUndefined();
+            const manifest = call[0].body as Manifest;
+            expect(manifest.spec.entrypoint).toBe('run-action');
+            expect(manifest.spec.templates[0]?.podSpecPatch).toBeUndefined();
         });
 
-        test('submits the workflow with no affinity when the node list fetch fails', async () => {
+        test('dispatches a single unconstrained template when the node list fetch fails', async () => {
             (actionRepo.findOneOrFail as jest.Mock).mockResolvedValue(
                 baseAction,
             );
@@ -451,8 +692,9 @@ describe('WorkflowDispatchService', () => {
 
             expect(mockCreateNamespacedCustomObject).toHaveBeenCalledTimes(1);
             const [call] = mockCreateNamespacedCustomObject.mock.calls;
-            const manifest = call[0].body as ManifestWithAffinity;
-            expect(manifest.spec.templates[0].affinity).toBeUndefined();
+            const manifest = call[0].body as Manifest;
+            expect(manifest.spec.entrypoint).toBe('run-action');
+            expect(manifest.spec.templates[0]?.podSpecPatch).toBeUndefined();
         });
     });
 

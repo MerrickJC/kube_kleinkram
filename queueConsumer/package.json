@@ -1,6 +1,6 @@
 {
     "name": "kleinkram-queue-consumer",
-    "version": "1.1.5",
+    "version": "1.1.6",
     "license": "MIT",
     "scripts": {
         "build": "nest build --webpack",

@@ -81,11 +81,20 @@ export class FileStorageService {
                   'response-content-disposition': `attachment; filename="${file.filename}"`,
               };
 
-        return await this.dataStorage.getPresignedDownloadUrl(
-            file.uuid,
-            expires ? 4 * 60 * 60 : 604_800,
-            disposition,
-        );
+        // Actions run in-cluster and should hit the internal, node-local
+        // storage endpoint rather than the externally-reachable one
+        // browsers/the standalone CLI need
+        return action
+            ? await this.dataStorage.getInternalPresignedDownloadUrl(
+                  file.uuid,
+                  expires ? 4 * 60 * 60 : 604_800,
+                  disposition,
+              )
+            : await this.dataStorage.getPresignedDownloadUrl(
+                  file.uuid,
+                  expires ? 4 * 60 * 60 : 604_800,
+                  disposition,
+              );
     }
 
     /**

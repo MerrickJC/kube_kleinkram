@@ -231,13 +231,17 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
             workflow.status ?? {},
         );
 
-        if (action.template && workflow.status?.startedAt) {
+        // Query Prometheus over the Pod's actual run window, not the
+        // Workflow's (which starts counting as soon as Argo begins
+        // orchestrating, before Kueue admits the Pod) — otherwise the queue
+        // wait gets averaged into CPU/memory usage as if it were idle runtime.
+        if (action.template && action.actionContainerStartedAt) {
             const memoryLimitBytes =
                 action.template.cpuMemory * 1024 * 1024 * 1024;
             await this.resourceUsageService.recordUsage(
                 action.uuid,
                 memoryLimitBytes,
-                this.parseDate(workflow.status.startedAt) ?? finished,
+                action.actionContainerStartedAt,
                 finished,
             );
         }
@@ -287,11 +291,39 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    /**
+     * A locality-tiered Action creates one Pod per widening attempt (see
+     * WorkflowDispatchService), so a Workflow can carry several Pod-type
+     * nodes rather than exactly one. Prefer whichever is currently Running,
+     * else the most recently started/finished attempt, so ActionEntity
+     * mirrors the active (or final) attempt rather than an arbitrary
+     * earlier one.
+     */
     private findPodNode(workflow: WorkflowObject): WorkflowNode | undefined {
         const nodes = workflow.status?.nodes as
             Record<string, WorkflowNode> | undefined;
         if (!nodes) return undefined;
-        return Object.values(nodes).find((node) => node.type === 'Pod');
+
+        const podNodes = Object.values(nodes).filter(
+            (node) => node.type === 'Pod',
+        );
+        if (podNodes.length <= 1) return podNodes[0];
+
+        const running = podNodes.find((node) => node.phase === 'Running');
+        if (running) return running;
+
+        const timestamp = (node: WorkflowNode): number => {
+            const value = node.finishedAt ?? node.startedAt;
+            if (!value) return 0;
+            const parsed = new Date(value).getTime();
+            return Number.isNaN(parsed) ? 0 : parsed;
+        };
+
+        let latest = podNodes[0];
+        for (const node of podNodes) {
+            if (timestamp(node) >= timestamp(latest)) latest = node;
+        }
+        return latest;
     }
 
     private isTerminalPhase(phase: string): boolean {

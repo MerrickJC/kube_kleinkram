@@ -44,7 +44,8 @@ data:
   LOCALITY_ENABLED: {{ .Values.locality.enabled | quote }}
   LOCALITY_NODE_LABEL_SELECTOR: {{ .Values.locality.nodeLabelSelector | quote }}
   LOCALITY_GPU_NODE_LABEL_SELECTOR: {{ .Values.locality.gpuNodeLabelSelector | quote }}
-  LOCALITY_REPLICA_COUNT: {{ .Values.locality.replicaCount | quote }}
+  LOCALITY_TIER_SIZES: {{ .Values.locality.tierSizes | quote }}
+  LOCALITY_FALLBACK_RETRY_LIMIT: {{ .Values.locality.fallbackRetryLimit | quote }}
   {{- if .Values.observability.prometheusUrl }}
   PROMETHEUS_URL: {{ .Values.observability.prometheusUrl | quote }}
   {{- end }}
