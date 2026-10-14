@@ -26,8 +26,20 @@ import { ActionErrorHintService } from './action-error-hint.service';
 import { ArtifactStatusService } from './artifact-status.service';
 import { ResourceUsageService } from './resource-usage.service';
 
+interface WorkflowNode {
+    type?: string;
+    phase?: string;
+    startedAt?: string;
+    finishedAt?: string;
+}
+
 interface WorkflowObject {
     metadata?: { name?: string; labels?: Record<string, string> };
+    // `nodes` is deliberately left out of this type literal (rather than
+    // typed as Record<string, WorkflowNode>): ArtifactStatusService declares
+    // its own unrelated WorkflowNode shape for the same `status` object, and
+    // having two structurally-disjoint `nodes` types on this shared object
+    // trips TS's weak-type-detection check. Read via findPodNode() instead.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     status?: Record<string, any> & {
         phase?: string;
@@ -148,7 +160,20 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
                 return;
             }
             case 'Running': {
+                // The Pod node's phase/startedAt tracks the real Pod
+                // lifecycle, so use that to tell "queued" apart from
+                // "actually running" wherever node info is available.
+                const podNode = this.findPodNode(workflow);
+                const stillQueued =
+                    podNode !== undefined &&
+                    podNode.phase !== 'Running' &&
+                    !podNode.startedAt;
+                if (stillQueued) return;
+
                 if (action.state !== ActionState.PROCESSING) {
+                    const startedAt =
+                        this.parseDate(podNode?.startedAt) ??
+                        this.parseDate(workflow.status?.startedAt);
                     await this.actionRepository.update(
                         { uuid: actionUuid },
                         {
@@ -156,11 +181,9 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
                             // eslint-disable-next-line @typescript-eslint/naming-convention
                             state_cause: 'Action is currently running...',
                             executionStartedAt:
-                                action.executionStartedAt ??
-                                this.parseDate(workflow.status?.startedAt),
+                                action.executionStartedAt ?? startedAt,
                             actionContainerStartedAt:
-                                action.actionContainerStartedAt ??
-                                this.parseDate(workflow.status?.startedAt),
+                                action.actionContainerStartedAt ?? startedAt,
                         },
                     );
                 }
@@ -262,6 +285,13 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
             apiKey.deletedAt = new Date();
             await this.apikeyRepository.save(apiKey);
         }
+    }
+
+    private findPodNode(workflow: WorkflowObject): WorkflowNode | undefined {
+        const nodes = workflow.status?.nodes as
+            Record<string, WorkflowNode> | undefined;
+        if (!nodes) return undefined;
+        return Object.values(nodes).find((node) => node.type === 'Pod');
     }
 
     private isTerminalPhase(phase: string): boolean {

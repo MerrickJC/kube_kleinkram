@@ -6,7 +6,6 @@
 import type { ActionDto } from '@kleinkram/api-dto/types/actions/action.dto';
 import { ActionState } from '@kleinkram/shared';
 import AppInput from 'components/common/app-input.vue';
-import { formatDuration } from 'src/services/date-formating';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const props = defineProps<{ action: ActionDto }>();
@@ -40,29 +39,21 @@ watch(
 );
 
 const runtimeString = computed(() => {
-    if (lastServerRuntime.value !== undefined) {
-        let currentRuntime = lastServerRuntime.value;
+    // `runtime` is only populated once the Action's container has actually
+    // started (see actionEntityToDto) — before that it's still queued, which
+    // is reported separately by ActionQueueWait.
+    if (lastServerRuntime.value === undefined) return 'N/A';
 
-        // If the action is running, add the time elapsed since the last server update
-        if (props.action.state === ActionState.PROCESSING) {
-            const elapsedSinceUpdate =
-                (now.value - lastServerUpdate.value) / 1000;
-            currentRuntime += elapsedSinceUpdate;
-        }
+    let currentRuntime = lastServerRuntime.value;
 
-        const secondsProxy = currentRuntime.toFixed(0);
-        if (secondsProxy === '0') return 'N/A';
-        return `${secondsProxy} second${secondsProxy === '1' ? '' : 's'}`;
-    }
-
-    const start = new Date(props.action.createdAt).getTime();
-    let end = new Date(props.action.updatedAt).getTime();
-
+    // If the action is running, add the time elapsed since the last server update
     if (props.action.state === ActionState.PROCESSING) {
-        end = now.value;
+        const elapsedSinceUpdate = (now.value - lastServerUpdate.value) / 1000;
+        currentRuntime += elapsedSinceUpdate;
     }
 
-    const seconds = (end - start) / 1000;
-    return formatDuration(seconds);
+    const secondsProxy = currentRuntime.toFixed(0);
+    if (secondsProxy === '0') return 'N/A';
+    return `${secondsProxy} second${secondsProxy === '1' ? '' : 's'}`;
 });
 </script>

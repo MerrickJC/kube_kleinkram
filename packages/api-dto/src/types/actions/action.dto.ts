@@ -56,6 +56,10 @@ export class ActionDto {
     @IsOptional()
     runtime?: number;
 
+    @ApiProperty({ required: false })
+    @IsOptional()
+    queueWaitSeconds?: number;
+
     @ApiProperty()
     @ValidateNested({ each: true })
     @Type(() => AuditLogDto)

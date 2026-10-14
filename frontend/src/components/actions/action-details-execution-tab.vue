@@ -74,6 +74,9 @@
                 />
             </div>
             <div class="col-12 col-sm-6">
+                <ActionQueueWait :action="action" />
+            </div>
+            <div class="col-12 col-sm-6">
                 <ActionRuntime :action="action" />
             </div>
             <div class="col-12 col-sm-6">
@@ -354,6 +357,7 @@ import {
     ArtifactState,
     ImageSource,
 } from '@kleinkram/shared';
+import ActionQueueWait from 'components/actions/action-queue-wait.vue';
 import ActionRuntime from 'components/actions/action-runtime.vue';
 import ArtifactFileTree from 'components/actions/artifact-file-tree.vue';
 import AppInput from 'components/common/app-input.vue';

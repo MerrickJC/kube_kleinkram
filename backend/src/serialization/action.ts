@@ -1,6 +1,6 @@
 import { ActionDto, AuditLogDto, DockerImageDto } from '@kleinkram/api-dto';
 import { ActionEntity } from '@kleinkram/backend-common/entities/action/action.entity';
-import { ArtifactState } from '@kleinkram/shared';
+import { ActionState, ArtifactState } from '@kleinkram/shared';
 import { actionTemplateEntityToDto } from './action-template';
 import { missionEntityToDto, userEntityToDto } from './index';
 
@@ -23,6 +23,22 @@ export const actionEntityToDto = (action: ActionEntity): ActionDto => {
             ? action.actionContainerExitedAt.getTime()
             : Date.now();
         runtime = (end - action.actionContainerStartedAt.getTime()) / 1000;
+    }
+
+    // Time spent queued (e.g. awaiting Kueue admission) before the Action's
+    // container actually started, kept separate from `runtime` above so the
+    // dashboard doesn't report wall-clock queue wait as execution time.
+    let queueWaitSeconds: number | undefined;
+    if (action.actionContainerStartedAt) {
+        queueWaitSeconds =
+            (action.actionContainerStartedAt.getTime() -
+                action.createdAt.getTime()) /
+            1000;
+    } else if (
+        action.state === ActionState.PENDING ||
+        action.state === ActionState.STARTING
+    ) {
+        queueWaitSeconds = (Date.now() - action.createdAt.getTime()) / 1000;
     }
 
     let computedArtifactState = action.artifacts;
@@ -49,6 +65,7 @@ export const actionEntityToDto = (action: ActionEntity): ActionDto => {
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         image: (action.image as DockerImageDto) ?? { repoDigests: [] },
         runtime,
+        queueWaitSeconds,
 
         mission: missionEntityToDto(action.mission),
         state: action.state,

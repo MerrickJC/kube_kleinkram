@@ -105,6 +105,58 @@ describe('WorkflowWatchService', () => {
             );
         });
 
+        test('Running does not transition to PROCESSING while the Pod node is still Pending (e.g. awaiting Kueue admission)', async () => {
+            (actionRepo.findOne as jest.Mock).mockResolvedValue({
+                uuid: actionUuid,
+                state: ActionState.STARTING,
+            });
+
+            await asPrivate(service).handleEvent({
+                metadata: { labels: workflowLabels(actionUuid) },
+                status: {
+                    // Workflow-level phase/startedAt already say "Running",
+                    // but the Pod itself hasn't started yet
+                    phase: 'Running',
+                    startedAt: '2026-01-01T00:00:00Z',
+                    nodes: {
+                        'node-1': { type: 'Pod', phase: 'Pending' },
+                    },
+                },
+            });
+
+            expect(actionRepo.update).not.toHaveBeenCalled();
+        });
+
+        test('Running transitions to PROCESSING using the Pod node startedAt once the Pod itself is Running', async () => {
+            (actionRepo.findOne as jest.Mock).mockResolvedValue({
+                uuid: actionUuid,
+                state: ActionState.STARTING,
+            });
+
+            await asPrivate(service).handleEvent({
+                metadata: { labels: workflowLabels(actionUuid) },
+                status: {
+                    phase: 'Running',
+                    startedAt: '2026-01-01T00:00:00Z',
+                    nodes: {
+                        'node-1': {
+                            type: 'Pod',
+                            phase: 'Running',
+                            startedAt: '2026-01-01T00:10:00Z',
+                        },
+                    },
+                },
+            });
+
+            expect(actionRepo.update).toHaveBeenCalledWith(
+                { uuid: actionUuid },
+                expect.objectContaining({
+                    state: ActionState.PROCESSING,
+                    actionContainerStartedAt: new Date('2026-01-01T00:10:00Z'),
+                }),
+            );
+        });
+
         test('Running is a no-op when the action is already PROCESSING', async () => {
             (actionRepo.findOne as jest.Mock).mockResolvedValue({
                 uuid: actionUuid,
