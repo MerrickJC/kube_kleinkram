@@ -11,7 +11,7 @@ klein login --key "$KLEINKRAM_API_KEY"
 
 # Download data
 mkdir /tmp/data
-klein download -m "$KLEINKRAM_MISSION_UUID" --dest /tmp/data
+klein download -m "$KLEINKRAM_MISSION_UUID" --dest /tmp/data --include-corrupt-files -y
 
 # Extract bag length 
 DURATION=$(python3 -c "import yaml; duration_ns = yaml.safe_load(open('/tmp/data/metadata.yaml'))['rosbag2_bagfile_information']['duration']['nanoseconds']; print(duration_ns // 1_000_000_000)")
