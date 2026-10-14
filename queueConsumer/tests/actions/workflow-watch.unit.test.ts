@@ -171,11 +171,14 @@ describe('WorkflowWatchService', () => {
             expect(actionRepo.update).not.toHaveBeenCalled();
         });
 
-        test('Succeeded marks the action DONE and records artifacts/usage', async () => {
+        test('Succeeded marks the action DONE and records artifacts/usage over the Pod run window', async () => {
             (actionRepo.findOne as jest.Mock).mockResolvedValue({
                 uuid: actionUuid,
                 state: ActionState.PROCESSING,
                 template: { cpuMemory: 2 },
+                // Already persisted by an earlier Running event, using the
+                // Pod node's own startedAt rather than the Workflow's
+                actionContainerStartedAt: new Date('2026-01-01T00:02:00Z'),
             });
 
             await asPrivate(service).handleEvent({
@@ -194,9 +197,32 @@ describe('WorkflowWatchService', () => {
             expect(
                 artifactStatusService.recordFromWorkflowStatus,
             ).toHaveBeenCalledWith(actionUuid, expect.anything());
-            expect(resourceUsageService.recordUsage).toHaveBeenCalled();
+            expect(resourceUsageService.recordUsage).toHaveBeenCalledWith(
+                actionUuid,
+                expect.any(Number),
+                new Date('2026-01-01T00:02:00Z'),
+                new Date('2026-01-01T00:05:00Z'),
+            );
             expect(actionErrorHintService.assess).not.toHaveBeenCalled();
             expect(mockDeleteNamespacedSecret).toHaveBeenCalled();
+        });
+
+        test('Succeeded skips resource-usage recording when the Pod never actually started', async () => {
+            (actionRepo.findOne as jest.Mock).mockResolvedValue({
+                uuid: actionUuid,
+                state: ActionState.STARTING,
+                template: { cpuMemory: 2 },
+            });
+
+            await asPrivate(service).handleEvent({
+                metadata: { labels: workflowLabels(actionUuid) },
+                status: {
+                    phase: 'Succeeded',
+                    finishedAt: '2026-01-01T00:05:00Z',
+                },
+            });
+
+            expect(resourceUsageService.recordUsage).not.toHaveBeenCalled();
         });
 
         test('Failed marks the action FAILED and asks for an error hint', async () => {

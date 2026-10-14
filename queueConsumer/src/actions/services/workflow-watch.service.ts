@@ -231,13 +231,17 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
             workflow.status ?? {},
         );
 
-        if (action.template && workflow.status?.startedAt) {
+        // Query Prometheus over the Pod's actual run window, not the
+        // Workflow's (which starts counting as soon as Argo begins
+        // orchestrating, before Kueue admits the Pod) — otherwise the queue
+        // wait gets averaged into CPU/memory usage as if it were idle runtime.
+        if (action.template && action.actionContainerStartedAt) {
             const memoryLimitBytes =
                 action.template.cpuMemory * 1024 * 1024 * 1024;
             await this.resourceUsageService.recordUsage(
                 action.uuid,
                 memoryLimitBytes,
-                this.parseDate(workflow.status.startedAt) ?? finished,
+                action.actionContainerStartedAt,
                 finished,
             );
         }
