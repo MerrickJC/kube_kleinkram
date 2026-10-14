@@ -61,7 +61,7 @@ export class ResourceUsageService {
         start: Date,
         end: Date,
     ): Promise<ResourceUsage | null> {
-        const step = '15s';
+        const step = '5s';
         const podSelector = `pod=~"action-${actionUuid}.*"`;
 
         const [memorySeries, cpuSeries] = await Promise.all([
