@@ -10,7 +10,10 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
+import { InjectMetric } from '@willsoto/nestjs-prometheus';
+import { Counter } from 'prom-client';
 import { In, IsNull, Not, Repository } from 'typeorm';
+import { ACTION_LOCALITY_LANDED_RANK_METRIC } from '../actions.metrics';
 import {
     ACTION_MANAGED_BY_LABEL_SELECTOR,
     ACTION_UUID_LABEL,
@@ -35,6 +38,9 @@ interface WorkflowNode {
 
 interface WorkflowObject {
     metadata?: { name?: string; labels?: Record<string, string> };
+    // Only the one field this service reads off a template; the rest of
+    // each template (container, volumes, ...) is irrelevant here
+    spec?: { templates?: { podSpecPatch?: string }[] };
     // `nodes` is deliberately left out of this type literal (rather than
     // typed as Record<string, WorkflowNode>): ArtifactStatusService declares
     // its own unrelated WorkflowNode shape for the same `status` object, and
@@ -68,6 +74,8 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
         private readonly artifactStatusService: ArtifactStatusService,
         private readonly resourceUsageService: ResourceUsageService,
         private readonly actionErrorHintService: ActionErrorHintService,
+        @InjectMetric(ACTION_LOCALITY_LANDED_RANK_METRIC)
+        private readonly localityLandedRank: Counter,
     ) {}
 
     onModuleInit(): void {
@@ -186,6 +194,7 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
                                 action.actionContainerStartedAt ?? startedAt,
                         },
                     );
+                    await this.recordLocalityLandedRank(actionUuid, workflow);
                 }
                 return;
             }
@@ -289,6 +298,110 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
             apiKey.deletedAt = new Date();
             await this.apikeyRepository.save(apiKey);
         }
+    }
+
+    /**
+     * Records which preference rank the Action's pod actually landed on -
+     * "1" for the single top-ranked cache-tier node, "2" for the next, and
+     * so on, "other" for a node outside the ranked list (e.g. a non-cache
+     * -tier node reached via some edge case), "unknown" if the scheduled
+     * node couldn't be resolved at all. Only called once, from the first
+     * Running transition, so each Action run contributes exactly one
+     * observation regardless of how many tiers it widened through.
+     *
+     * Uses a rank label rather than the actual node name or action UUID to
+     * avoid unbounded Prometheus cardinality - this is meant to answer "is
+     * locality scheduling working", not to look up individual runs (use the
+     * existing Loki-shipped logs, keyed by action_run_uuid, for that).
+     */
+    private async recordLocalityLandedRank(
+        actionUuid: string,
+        workflow: WorkflowObject,
+    ): Promise<void> {
+        const nodeName = await this.resolveScheduledNodeName(actionUuid);
+        const preferredOrder = this.extractPreferredNodeOrder(workflow);
+        const rank = this.rankLabelForNode(preferredOrder, nodeName);
+        this.localityLandedRank.inc({ rank });
+    }
+
+    /**
+     * Reads the actual node a run's pod was scheduled onto. Queries live
+     * Pods (rather than Argo's own node status, whose node-placement field
+     * isn't consistently present across Argo versions) filtered to this
+     * action's `action_run_uuid` pod label - set on every tier's pod via
+     * the Workflow's `podMetadata.labels`, see WorkflowDispatchService.
+     * Earlier tier attempts that were evicted by Kueue no longer exist by
+     * the time a later attempt is Running, so this should resolve to
+     * exactly the attempt that succeeded.
+     */
+    private async resolveScheduledNodeName(
+        actionUuid: string,
+    ): Promise<string | undefined> {
+        try {
+            const response = await getCoreV1Api().listNamespacedPod({
+                namespace: actionsNamespace(),
+                labelSelector: `action_run_uuid=${actionUuid}`,
+            });
+            return response.items.find((pod) => pod.spec?.nodeName)?.spec
+                ?.nodeName;
+        } catch (error) {
+            this.logger.debug(
+                `Failed to resolve scheduled node for action ${actionUuid}: ${String(error)}`,
+            );
+            return undefined;
+        }
+    }
+
+    /**
+     * Recovers the submission-time node ranking from the Workflow spec
+     * itself: every per-tier template carries the identical weighted
+     * `preferredDuringSchedulingIgnoredDuringExecution` list (see
+     * WorkflowDispatchService.computeLocalityTiers), so the first template
+     * that has one gives the full ranked node order.
+     */
+    private extractPreferredNodeOrder(workflow: WorkflowObject): string[] {
+        for (const template of workflow.spec?.templates ?? []) {
+            if (!template.podSpecPatch) continue;
+            try {
+                const patch = JSON.parse(template.podSpecPatch) as {
+                    affinity?: {
+                        nodeAffinity?: {
+                            preferredDuringSchedulingIgnoredDuringExecution?: {
+                                preference?: {
+                                    matchExpressions?: { values?: string[] }[];
+                                };
+                            }[];
+                        };
+                    };
+                };
+                const terms =
+                    patch.affinity?.nodeAffinity
+                        ?.preferredDuringSchedulingIgnoredDuringExecution;
+                if (terms && terms.length > 0) {
+                    return terms
+                        .map(
+                            (term) =>
+                                term.preference?.matchExpressions?.[0]
+                                    ?.values?.[0],
+                        )
+                        .filter((name): name is string => Boolean(name));
+                }
+            } catch (error) {
+                this.logger.debug(
+                    `Failed to parse podSpecPatch while recovering node preference order: ${String(error)}`,
+                );
+            }
+        }
+        return [];
+    }
+
+    private rankLabelForNode(
+        preferredOrder: string[],
+        nodeName: string | undefined,
+    ): string {
+        if (!nodeName) return 'unknown';
+        const index = preferredOrder.indexOf(nodeName);
+        return index === -1 ? 'other' : (index + 1).toString();
     }
 
     /**

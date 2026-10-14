@@ -64,6 +64,16 @@ Re-measure and update `values.yaml`'s `kueue.quota` whenever nodes are added to 
 
 **Action containers should be idempotent.** A genuine Action failure (bad download, non-zero exit) doesn't end a tier step in `Succeeded` any more than a Kueue eviction does, so it also widens through the remaining tiers before the run is finally reported as failed - up to one attempt per configured tier plus the fallback's retries. Don't rely on an Action running exactly once.
 
+**Measuring whether scheduling is actually landing on the desired nodes.** `queue-consumer` exposes a Prometheus `/metrics` endpoint on its existing port (`3000`), including a counter `kleinkram_action_locality_landed_rank_total{rank}` (see `WorkflowWatchService.recordLocalityLandedRank`). Once per Action run, as soon as its pod is confirmed `Running`, the service resolves the actual node it landed on and compares it against the ranked node order embedded in the Workflow's own `podSpecPatch` (the same ordering used to build each tier), then increments the counter with:
+
+- `rank="1"`, `"2"`, `"3"`, ... - the 1-indexed position of the actual node within that ranking (so `rank="1"` is the single best-ranked node, `rank="2"` the next, and so on)
+- `rank="other"` - the pod landed on a node outside the ranked list entirely (e.g. a node that wasn't labeled `cache-tier=true` at submission time)
+- `rank="unknown"` - the scheduled node couldn't be resolved (the Pod lookup failed)
+
+The label is a rank position, not a node name or `action_run_uuid` - this keeps cardinality fixed regardless of cluster size or run volume, so it's safe to leave this metric running indefinitely. A `sum by (rank) (increase(kleinkram_action_locality_landed_rank_total[1h]))` (or similar, bucketed over whatever window you want) gives a per-rank count suitable for a Grafana bar/stacked-area panel. For per-run drill-down (which specific action landed where), use the existing Loki logs instead, keyed by the `action_run_uuid` pod label.
+
+This metric isn't scraped by anything yet - this chart doesn't deploy Prometheus or its scrape config (see [Prerequisites](#prerequisites)), the same gap that already exists for `api-server`'s own `/metrics`. Either add a scrape target pointing at `queue-consumer:3000/metrics` the same way you already scrape (or would scrape) `api-server`, or set `queueConsumer.podAnnotations` in `values.yaml` to the `prometheus.io/scrape`/`prometheus.io/port`/`prometheus.io/path` annotations if your Prometheus uses annotation-based pod discovery.
+
 ## Secrets
 
 This chart does not create `Secret` objects or holds secret material for configuring connections to prerequisite services, it only references Secret names in its Deployments. The chart's values.yaml defines a `secretNames` field with references to Secret names as well as `argo.artifactRepository.credentialsSecretName`. You need to create each of the Secrets yourself using the keys documented next to each value in `values.yaml`. It would be advisable to use some sort of Secret management tool such as [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets), [External Secrets Operator](https://external-secrets.io/), or [SOPS](https://getsops.io/).

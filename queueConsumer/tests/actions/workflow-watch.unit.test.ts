@@ -14,6 +14,7 @@ jest.mock('../../src/logger', () => ({
 
 const mockDeleteNamespacedSecret = jest.fn();
 const mockGetNamespacedCustomObject = jest.fn();
+const mockListNamespacedPod = jest.fn();
 
 jest.mock('../../src/actions/helper/kube-client', () => {
     const actual = jest.requireActual('../../src/actions/helper/kube-client');
@@ -21,6 +22,7 @@ jest.mock('../../src/actions/helper/kube-client', () => {
         ...actual,
         getCoreV1Api: () => ({
             deleteNamespacedSecret: mockDeleteNamespacedSecret,
+            listNamespacedPod: mockListNamespacedPod,
         }),
         getCustomObjectsApi: () => ({
             getNamespacedCustomObject: mockGetNamespacedCustomObject,
@@ -43,6 +45,7 @@ describe('WorkflowWatchService', () => {
     let artifactStatusService: ArtifactStatusService;
     let resourceUsageService: ResourceUsageService;
     let actionErrorHintService: ActionErrorHintService;
+    let localityLandedRank: { inc: jest.Mock };
 
     const actionUuid = 'action-uuid';
 
@@ -72,15 +75,20 @@ describe('WorkflowWatchService', () => {
             assess: jest.fn().mockResolvedValue(undefined),
         } as unknown as ActionErrorHintService;
 
+        localityLandedRank = { inc: jest.fn() };
+
         service = new WorkflowWatchService(
             actionRepo,
             apikeyRepo,
             artifactStatusService,
             resourceUsageService,
             actionErrorHintService,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            localityLandedRank as any,
         );
 
         mockDeleteNamespacedSecret.mockResolvedValue({});
+        mockListNamespacedPod.mockResolvedValue({ items: [] });
     });
 
     const workflowLabels = (uuid: string) => ({
@@ -277,6 +285,139 @@ describe('WorkflowWatchService', () => {
             });
 
             expect(actionRepo.update).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('locality-landed rank metric', () => {
+        const runningWorkflow = (preferredNodeNames: string[]) => ({
+            metadata: { labels: workflowLabels(actionUuid) },
+            spec: {
+                templates: [
+                    {
+                        podSpecPatch: JSON.stringify({
+                            affinity: {
+                                nodeAffinity: {
+                                    preferredDuringSchedulingIgnoredDuringExecution:
+                                        preferredNodeNames.map((name) => ({
+                                            weight: 100,
+                                            preference: {
+                                                matchExpressions: [
+                                                    {
+                                                        key: 'kubernetes.io/hostname',
+                                                        operator: 'In',
+                                                        values: [name],
+                                                    },
+                                                ],
+                                            },
+                                        })),
+                                },
+                            },
+                        }),
+                    },
+                ],
+            },
+            status: {
+                phase: 'Running',
+                startedAt: '2026-01-01T00:00:00Z',
+                nodes: {
+                    'node-1': {
+                        type: 'Pod',
+                        phase: 'Running',
+                        startedAt: '2026-01-01T00:10:00Z',
+                    },
+                },
+            },
+        });
+
+        test('records rank "1" when the pod landed on the top-ranked node', async () => {
+            (actionRepo.findOne as jest.Mock).mockResolvedValue({
+                uuid: actionUuid,
+                state: ActionState.STARTING,
+            });
+            mockListNamespacedPod.mockResolvedValue({
+                items: [{ spec: { nodeName: 'node-a' } }],
+            });
+
+            await asPrivate(service).handleEvent(
+                runningWorkflow(['node-a', 'node-b', 'node-c']),
+            );
+
+            expect(mockListNamespacedPod).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    labelSelector: `action_run_uuid=${actionUuid}`,
+                }),
+            );
+            expect(localityLandedRank.inc).toHaveBeenCalledWith({
+                rank: '1',
+            });
+        });
+
+        test('records rank "3" when the pod landed on the third-ranked node', async () => {
+            (actionRepo.findOne as jest.Mock).mockResolvedValue({
+                uuid: actionUuid,
+                state: ActionState.STARTING,
+            });
+            mockListNamespacedPod.mockResolvedValue({
+                items: [{ spec: { nodeName: 'node-c' } }],
+            });
+
+            await asPrivate(service).handleEvent(
+                runningWorkflow(['node-a', 'node-b', 'node-c']),
+            );
+
+            expect(localityLandedRank.inc).toHaveBeenCalledWith({
+                rank: '3',
+            });
+        });
+
+        test('records rank "other" when the pod landed outside the ranked list', async () => {
+            (actionRepo.findOne as jest.Mock).mockResolvedValue({
+                uuid: actionUuid,
+                state: ActionState.STARTING,
+            });
+            mockListNamespacedPod.mockResolvedValue({
+                items: [{ spec: { nodeName: 'unranked-node' } }],
+            });
+
+            await asPrivate(service).handleEvent(
+                runningWorkflow(['node-a', 'node-b']),
+            );
+
+            expect(localityLandedRank.inc).toHaveBeenCalledWith({
+                rank: 'other',
+            });
+        });
+
+        test('records rank "unknown" when the scheduled node cannot be resolved', async () => {
+            (actionRepo.findOne as jest.Mock).mockResolvedValue({
+                uuid: actionUuid,
+                state: ActionState.STARTING,
+            });
+            mockListNamespacedPod.mockResolvedValue({ items: [] });
+
+            await asPrivate(service).handleEvent(
+                runningWorkflow(['node-a', 'node-b']),
+            );
+
+            expect(localityLandedRank.inc).toHaveBeenCalledWith({
+                rank: 'unknown',
+            });
+        });
+
+        test('is not recorded again once the action is already PROCESSING', async () => {
+            (actionRepo.findOne as jest.Mock).mockResolvedValue({
+                uuid: actionUuid,
+                state: ActionState.PROCESSING,
+            });
+            mockListNamespacedPod.mockResolvedValue({
+                items: [{ spec: { nodeName: 'node-a' } }],
+            });
+
+            await asPrivate(service).handleEvent(
+                runningWorkflow(['node-a', 'node-b']),
+            );
+
+            expect(localityLandedRank.inc).not.toHaveBeenCalled();
         });
     });
 

@@ -31,6 +31,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { PrometheusModule } from '@willsoto/nestjs-prometheus';
 import * as pg from 'pg';
 import { AccessGroupExpiryProvider } from './accessGroupExpiry/access-group-expiry.provider';
 import { ActionsModule } from './actions/actions.module';
@@ -41,6 +42,10 @@ import { TriggerProcessorModule } from './trigger-processor/trigger-processor.mo
 
 @Module({
     imports: [
+        PrometheusModule.register({
+            defaultLabels: { app: 'queue-consumer' },
+        }),
+
         BullModule.forRoot({
             redis,
         }),
