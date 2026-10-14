@@ -300,7 +300,17 @@ kueue:
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
-  # sample quotas. These numbers are examples only
+  # sample quotas. These numbers are examples only - replace them with your
+  # own cluster's real capacity. Kueue only enforces quota; it has no
+  # visibility into per-node fit, so if this is set higher than the cluster
+  # can actually run, excess pods go Pending in the scheduler instead of
+  # waiting gated in Kueue, and Kueue's waitForPodsReady (see
+  # docs/development/kubernetes-deployment.md) never sees them to evict and
+  # retry. Size each resource as: sum of node allocatable (not capacity) for
+  # the nodes this queue's ResourceFlavor can use, minus DaemonSet requests
+  # and other namespaces' pods on those nodes, minus a headroom margin. Do
+  # not raise this via a cohort/borrowing beyond what the cluster actually
+  # has. Re-measure and update whenever nodes are added or removed.
   quota:
     cpu:
       cpu: '16'
@@ -317,24 +327,42 @@ kueue:
   priorityClasses:
     enabled: true
 
-# Locality-scheduled S3 cache: soft node-affinity hint toward whichever
-# node's local JuiceFS gateway already caches an Action's mission data.
-# None of the gateway/cache infrastructure itself is deployed by this chart
-# this only tells the Action Operator which node labels to look for and how
-# many ranked nodes to prefer.
+# Locality-scheduled S3 cache: required, tiered node-affinity toward
+# whichever node's local JuiceFS gateway already caches an Action's mission
+# data, with a weighted preference layered on top of every tier's hard
+# requirement so that if several of a tier's allowed nodes are free at
+# once, the best-ranked one still wins rather than it being arbitrary.
+# None of the gateway/cache infrastructure itself is deployed by this
+# chart, this only tells the Action Operator which node labels to look for
+# and how to widen from the best-ranked node out to the rest of the
+# cache-tier pool if it's full. A pod never falls back to scheduling on
+# cluster-core nodes outside this pool - every tier (including the final
+# one) stays scoped to nodeLabelSelector (+ gpuNodeLabelSelector for GPU
+# actions). This requires Kueue's waitForPodsReady to be configured on the
+# Kueue installation (not by this chart - see
+# docs/development/kubernetes-deployment.md), otherwise a pod stuck on an
+# unschedulable tier is never evicted/retried into the next one.
 locality:
   enabled: true
-  # Must match the label applied   # to nodes running a node-local JuiceFS
+  # Must match the label applied to nodes running a node-local JuiceFS
   # gateway with a cache disk
   nodeLabelSelector: 'cache-tier=true'
   # Must match kueue.resourceFlavors.gpu.nodeSelector above, so a GPU
-  # action's affinity hint is only ever pointed at nodes it can actually
+  # action's affinity is only ever pointed at nodes it can actually
   # schedule onto. Keep these two in sync if you change the GPU node label.
   gpuNodeLabelSelector: 'gpu=true'
-  # Number of ranked nodes to give a weighted affinity preference to.
-  # Higher values add resilience if top-ranked nodes are often full, at the
-  # cost of diluting cache concentration
-  replicaCount: 2
+  # Ascending sizes of the strict, ranked-hostname tiers (top 1, top 2,
+  # top 4, ...) an Action run steps through - each capped at the number of
+  # eligible nodes actually found - before falling back to a final tier
+  # scoped to the whole cache-tier pool via nodeLabelSelector. Higher
+  # values/more tiers add resilience if top-ranked nodes are often full, at
+  # the cost of diluting cache concentration and a longer worst-case wait
+  # before a pod reaches an unconstrained-within-the-pool tier
+  tierSizes: '1,2,4'
+  # Retry limit for the final tier, so a Kueue waitForPodsReady eviction
+  # there (the whole cache-tier pool momentarily full) is retried in place
+  # rather than failing the Action
+  fallbackRetryLimit: 20
 
 argo:
   artifactRepository:

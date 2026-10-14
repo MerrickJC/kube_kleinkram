@@ -34,11 +34,15 @@ import {
     ARGO_VERSION,
     getCoreV1Api,
     getCustomObjectsApi,
+    isNodeReadySchedulable,
+    labelSelectorToMatchExpressions,
     listCacheTierNodes,
     localityEnabled,
+    localityFallbackRetryLimit,
     localityGpuNodeLabelSelector,
     localityNodeLabelSelector,
-    localityReplicaCount,
+    localityTierSizes,
+    type NodeSelectorRequirement,
     WORKFLOW_PLURAL,
     workflowNameForAction,
 } from '../helper/kube-client';
@@ -60,6 +64,13 @@ const ARTIFACT_REPOSITORY_CONFIGMAP =
 const OUTPUT_VOLUME_NAME = 'out';
 const OUTPUT_VOLUME_SIZE_LIMIT =
     process.env.ACTION_OUTPUT_VOLUME_SIZE_LIMIT ?? '10Gi';
+
+interface PreferredAffinityTerm {
+    weight: number;
+    preference: {
+        matchExpressions: { key: string; operator: 'In'; values: string[] }[];
+    };
+}
 
 /**
  * Consumes `submit-action` jobs from the dispatch queue and turns an
@@ -232,19 +243,32 @@ export class WorkflowDispatchService {
     }
 
     /**
-     * Builds a soft node-affinity hint toward whichever cache-tier node(s)
-     * rendezvous-hash to `missionUuid`, so a pod is likely to land where its
-     * mission's data is already cached by a node-local JuiceFS gateway.
+     * Computes the ranked, strict locality tiers (top 1, top 2, top 4, ...
+     * cache-tier nodes by rendezvous hash on `missionUuid`) plus the final
+     * tier's label-selector matchExpressions, so an Action pod widens from
+     * a hard requirement on its best-ranked JuiceFS-cache node out to the
+     * full cache-tier pool rather than silently landing anywhere once the
+     * top-ranked nodes are full. Also computes a shared, weighted preferred
+     * ranking (same formula as the old soft-only affinity) that's layered
+     * onto every tier's required constraint, so if several of a tier's
+     * allowed nodes happen to be free at once, the scheduler still leans
+     * toward the best-ranked one rather than picking among them arbitrarily.
      *
      * Returns undefined on any error, disablement, or when no eligible
-     * node is found (no affinity added, workflow dispatches as if this
-     * feature didn't exist)
+     * node is found at all (no affinity added, workflow dispatches as a
+     * single unconstrained step, same as before this feature existed)
      */
-    private async buildLocalityAffinity(
+    private async computeLocalityTiers(
         missionUuid: string,
         wantsGpu: boolean,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ): Promise<Record<string, any> | undefined> {
+    ): Promise<
+        | {
+              strictTiers: string[][];
+              finalSelectorExpressions: NodeSelectorRequirement[];
+              preferredTerms: PreferredAffinityTerm[];
+          }
+        | undefined
+    > {
         if (!localityEnabled()) return undefined;
 
         let nodes: V1Node[];
@@ -257,8 +281,11 @@ export class WorkflowDispatchService {
             return undefined;
         }
 
+        const schedulable = nodes.filter((node) =>
+            isNodeReadySchedulable(node),
+        );
         const eligible = wantsGpu
-            ? nodes.filter((node) => {
+            ? schedulable.filter((node) => {
                   const selector = localityGpuNodeLabelSelector();
                   const eqIndex = selector.indexOf('=');
                   const gpuLabelKey =
@@ -267,7 +294,7 @@ export class WorkflowDispatchService {
                       eqIndex === -1 ? '' : selector.slice(eqIndex + 1);
                   return node.metadata?.labels?.[gpuLabelKey] === gpuLabelValue;
               })
-            : nodes;
+            : schedulable;
 
         const nodeNames = eligible
             .map(
@@ -280,26 +307,77 @@ export class WorkflowDispatchService {
         if (nodeNames.length === 0) return undefined;
 
         const ranked = rankNodes(missionUuid, nodeNames);
-        const top = ranked.slice(0, localityReplicaCount());
 
-        return {
-            nodeAffinity: {
-                preferredDuringSchedulingIgnoredDuringExecution: top.map(
-                    (nodeName, rank) => ({
-                        weight: Math.max(1, Math.floor(100 / 2 ** rank)),
-                        preference: {
-                            matchExpressions: [
-                                {
-                                    key: 'kubernetes.io/hostname',
-                                    operator: 'In',
-                                    values: [nodeName],
-                                },
-                            ],
-                        },
-                    }),
+        const strictTiers: string[][] = [];
+        let lastSize = 0;
+        for (const size of localityTierSizes()) {
+            const cappedSize = Math.min(size, ranked.length);
+            if (cappedSize <= lastSize) continue;
+            strictTiers.push(ranked.slice(0, cappedSize));
+            lastSize = cappedSize;
+            if (cappedSize === ranked.length) break;
+        }
+
+        const finalSelectorExpressions = labelSelectorToMatchExpressions(
+            localityNodeLabelSelector(),
+        );
+        if (wantsGpu) {
+            finalSelectorExpressions.push(
+                ...labelSelectorToMatchExpressions(
+                    localityGpuNodeLabelSelector(),
                 ),
+            );
+        }
+
+        // Weights halve per rank (100, 50, 25, ...) and floor out at 1, so
+        // nodes beyond the largest configured tier size are indistinguishable
+        // anyway - cap the list there rather than weighting every eligible
+        // node for no practical benefit.
+        const preferredCap = Math.max(...localityTierSizes());
+        const preferredTerms = ranked
+            .slice(0, preferredCap)
+            .map((nodeName, rank) => ({
+                weight: Math.max(1, Math.floor(100 / 2 ** rank)),
+                preference: {
+                    matchExpressions: [
+                        {
+                            key: 'kubernetes.io/hostname',
+                            operator: 'In' as const,
+                            values: [nodeName],
+                        },
+                    ],
+                },
+            }));
+
+        return { strictTiers, finalSelectorExpressions, preferredTerms };
+    }
+
+    /**
+     * Builds a podSpecPatch combining a hard requirement (narrows the
+     * feasible node set to this tier) with the shared weighted preference
+     * (scores whichever of those nodes are actually free), so a tier never
+     * schedules outside its allowed nodes but still favors the best-ranked
+     * one among them when several are available at once.
+     */
+    private affinityPatch(
+        requiredNodeSelectorTerms: { matchExpressions: NodeSelectorRequirement[] }[],
+        preferredTerms: PreferredAffinityTerm[],
+    ): string {
+        return JSON.stringify({
+            affinity: {
+                nodeAffinity: {
+                    requiredDuringSchedulingIgnoredDuringExecution: {
+                        nodeSelectorTerms: requiredNodeSelectorTerms,
+                    },
+                    ...(preferredTerms.length > 0
+                        ? {
+                              preferredDuringSchedulingIgnoredDuringExecution:
+                                  preferredTerms,
+                          }
+                        : {}),
+                },
             },
-        };
+        });
     }
 
     private async buildWorkflowManifest(
@@ -315,7 +393,7 @@ export class WorkflowDispatchService {
             Math.round(template.maxRuntime * 3600),
         );
         const wantsGpu = template.gpuMemory > 0;
-        const affinity = await this.buildLocalityAffinity(
+        const tiers = await this.computeLocalityTiers(
             action.mission.uuid,
             wantsGpu,
         );
@@ -373,6 +451,30 @@ export class WorkflowDispatchService {
         if (template.entrypoint) container.command = [template.entrypoint];
         if (template.command) container.args = template.command.split(' ');
 
+        const volumes = [
+            {
+                name: OUTPUT_VOLUME_NAME,
+                emptyDir: { sizeLimit: OUTPUT_VOLUME_SIZE_LIMIT },
+            },
+        ];
+        const outputs = {
+            artifacts: [
+                {
+                    name: 'results',
+                    path: '/out',
+                    archive: { none: {} },
+                    s3: { key: action.uuid },
+                },
+            ],
+        };
+
+        const { entrypoint, templates } = this.buildEntrypointAndTemplates(
+            tiers,
+            container,
+            volumes,
+            outputs,
+        );
+
         return {
             apiVersion: `${ARGO_GROUP}/${ARGO_VERSION}`,
             kind: 'Workflow',
@@ -386,7 +488,7 @@ export class WorkflowDispatchService {
                 },
             },
             spec: {
-                entrypoint: 'run-action',
+                entrypoint,
                 serviceAccountName: actionPodServiceAccount(),
                 executor: {
                     serviceAccountName: actionExecutorServiceAccount(),
@@ -411,36 +513,120 @@ export class WorkflowDispatchService {
                         /* eslint-enable @typescript-eslint/naming-convention */
                     },
                 },
+                templates,
+            },
+        };
+    }
+
+    /**
+     * Builds the Workflow's `entrypoint` and `templates`.
+     *
+     * With no locality tiers (feature disabled, or no eligible cache-tier
+     * node found at all) this is a single unconstrained `run-action`
+     * template.
+     *
+     * With locality tiers, it's a `main` steps template chaining one step
+     * per strict ranked tier followed by a final step constrained to the
+     * live cache-tier label selector (not a frozen node list, see
+     * computeLocalityTiers). Each step's required constraint is layered
+     * with the same shared weighted preference, so if several of that
+     * step's allowed nodes are free at once, the best-ranked one still
+     * wins rather than it being arbitrary. Each step is tolerated via
+     * `continueOn` and gated with `when` so a step that doesn't succeed
+     * widens to the next tier rather than failing the workflow outright.
+     * Action containers should therefore be safe to re-run.
+     */
+    private buildEntrypointAndTemplates(
+        tiers:
+            | {
+                  strictTiers: string[][];
+                  finalSelectorExpressions: NodeSelectorRequirement[];
+                  preferredTerms: PreferredAffinityTerm[];
+              }
+            | undefined,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        container: Record<string, any>,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        volumes: Record<string, any>[],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        outputs: Record<string, any>,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ): { entrypoint: string; templates: Record<string, any>[] } {
+        if (!tiers) {
+            return {
+                entrypoint: 'run-action',
                 templates: [
-                    {
-                        name: 'run-action',
-                        ...(affinity ? { affinity } : {}),
-                        container,
-                        volumes: [
-                            {
-                                name: OUTPUT_VOLUME_NAME,
-                                emptyDir: {
-                                    sizeLimit: OUTPUT_VOLUME_SIZE_LIMIT,
-                                },
-                            },
-                        ],
-                        outputs: {
-                            artifacts: [
+                    { name: 'run-action', container, volumes, outputs },
+                ],
+            };
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const templates: Record<string, any>[] = [];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const steps: Record<string, any>[][] = [];
+
+        for (const [index, tierNodes] of tiers.strictTiers.entries()) {
+            const stepName = `tier-${index.toString()}`;
+            const templateName = `run-action-${stepName}`;
+            templates.push({
+                name: templateName,
+                podSpecPatch: this.affinityPatch(
+                    [
+                        {
+                            matchExpressions: [
                                 {
-                                    name: 'results',
-                                    path: '/out',
-                                    archive: {
-                                        none: {},
-                                    },
-                                    s3: {
-                                        key: action.uuid,
-                                    },
+                                    key: 'kubernetes.io/hostname',
+                                    operator: 'In',
+                                    values: tierNodes,
                                 },
                             ],
                         },
-                    },
-                ],
+                    ],
+                    tiers.preferredTerms,
+                ),
+                container,
+                volumes,
+                outputs,
+            });
+            steps.push([
+                {
+                    name: stepName,
+                    template: templateName,
+                    continueOn: { error: true, failed: true },
+                    ...(index > 0
+                        ? {
+                              when: `{{steps.tier-${(index - 1).toString()}.status}} != Succeeded`,
+                          }
+                        : {}),
+                },
+            ]);
+        }
+
+        templates.push({
+            name: 'run-action-tier-cache-any',
+            podSpecPatch: this.affinityPatch(
+                [{ matchExpressions: tiers.finalSelectorExpressions }],
+                tiers.preferredTerms,
+            ),
+            retryStrategy: {
+                limit: localityFallbackRetryLimit(),
+                retryPolicy: 'Always',
             },
-        };
+            container,
+            volumes,
+            outputs,
+        });
+        steps.push([
+            {
+                name: 'tier-cache-any',
+                template: 'run-action-tier-cache-any',
+                when: `{{steps.tier-${(tiers.strictTiers.length - 1).toString()}.status}} != Succeeded`,
+            },
+        ]);
+
+        templates.unshift({ name: 'main', steps });
+
+        return { entrypoint: 'main', templates };
     }
 }
