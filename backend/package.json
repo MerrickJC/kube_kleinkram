@@ -16,7 +16,7 @@
         "test": "jest --runInBand --detectOpenHandles --forceExit",
         "test:verbose": "jest --silent=false",
         "typeorm": "typeorm-ts-node-commonjs",
-        "migration:run-if-pending": "node -r ts-node/register ./migration/scripts/run-pending-migrations.ts",
+        "migration:run-if-pending": "node -r ts-node/register -r tsconfig-paths/register ./migration/scripts/run-pending-migrations.ts",
         "migration:generate:clean": "./migration/scripts/generate-clean-migration.sh",
         "migration:check": "./migration/scripts/generate-clean-migration.sh --check",
         "generate-openapi": "node -r ts-node/register ./scripts/generate-openapi.ts",
