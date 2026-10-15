@@ -25,7 +25,7 @@ export const actionEntityToDto = (action: ActionEntity): ActionDto => {
         runtime = (end - action.actionContainerStartedAt.getTime()) / 1000;
     }
 
-    // Time spent queued (e.g. awaiting Kueue admission) before the Action's
+    // Time spent queued (e.g. awaiting dispatch to a node) before the Action's
     // container actually started, kept separate from `runtime` above so the
     // dashboard doesn't report wall-clock queue wait as execution time.
     let queueWaitSeconds: number | undefined;

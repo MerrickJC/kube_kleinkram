@@ -32,20 +32,36 @@ data:
   OIDC_DISPLAY_NAME: {{ .Values.config.oidcDisplayName | quote }}
   OIDC_SCOPE: {{ .Values.config.oidcScope | quote }}
   {{- end }}
-  # Kubernetes/Argo/Kueue integration. Defaults match the code's fallbacks.
+  # Kubernetes/Argo integration. Defaults match the code's fallbacks.
   # Set explicitly here for operability/clarity.
   KUBE_NAMESPACE_ACTIONS: {{ .Values.queueConsumer.actionsNamespace | quote }}
-  KUEUE_LOCAL_QUEUE: {{ .Values.queueConsumer.kueueLocalQueue | quote }}
   ARGO_ARTIFACT_REPOSITORY_CONFIGMAP: {{ .Values.queueConsumer.argoArtifactRepositoryConfigMap | quote }}
   ACTION_POD_SERVICE_ACCOUNT: {{ .Values.actions.serviceAccountName | quote }}
   ACTION_EXECUTOR_SERVICE_ACCOUNT: {{ .Values.actions.executorServiceAccountName | quote }}
-  # Node labeling and the gateway/cache infrastructure itself are external
-  # this only configures how the Action Operator looks them up
-  LOCALITY_ENABLED: {{ .Values.locality.enabled | quote }}
+  # Node labeling and the gateway/cache infrastructure itself are external;
+  # this only configures which node labels the dispatcher's
+  # ClusterStateService ranks and dispatches against
   LOCALITY_NODE_LABEL_SELECTOR: {{ .Values.locality.nodeLabelSelector | quote }}
   LOCALITY_GPU_NODE_LABEL_SELECTOR: {{ .Values.locality.gpuNodeLabelSelector | quote }}
-  LOCALITY_TIER_SIZES: {{ .Values.locality.tierSizes | quote }}
-  LOCALITY_FALLBACK_RETRY_LIMIT: {{ .Values.locality.fallbackRetryLimit | quote }}
+  LOCALITY_GPU_TAINT_KEY: {{ .Values.locality.gpuTaintKey | quote }}
+  # Locality dispatcher (queueConsumer/src/actions/dispatcher) tuning.
+  # ACTION_DISPATCHER_ENABLED is set directly per-Deployment instead of here
+  # (true on action-dispatcher, false on queue-consumer), since it must
+  # differ between them.
+  DISPATCHER_AVG_RUNTIME_S: {{ .Values.dispatcher.avgRuntimeSeconds | quote }}
+  DISPATCHER_MISS_PENALTY_S: {{ .Values.dispatcher.missPenaltySeconds | quote }}
+  DISPATCHER_RESERVE_AFTER_S: {{ .Values.dispatcher.reserveAfterSeconds | quote }}
+  DISPATCHER_MAX_BLOCKED_NODES: {{ .Values.dispatcher.maxBlockedNodes | quote }}
+  DISPATCHER_INFLIGHT_TTL_S: {{ .Values.dispatcher.inflightTtlSeconds | quote }}
+  DISPATCHER_PENDING_TIMEOUT_S: {{ .Values.dispatcher.pendingTimeoutSeconds | quote }}
+  DISPATCHER_MAX_ATTEMPTS: {{ .Values.dispatcher.maxAttempts | quote }}
+  DISPATCHER_FALLBACK_DEPTH: {{ .Values.dispatcher.fallbackDepth | quote }}
+  DISPATCHER_CYCLE_DEBOUNCE_MS: {{ .Values.dispatcher.cycleDebounceMs | quote }}
+  DISPATCHER_NODE_CHANGE_DEBOUNCE_S: {{ .Values.dispatcher.nodeChangeDebounceSeconds | quote }}
+  DISPATCHER_RESYNC_S: {{ .Values.dispatcher.resyncSeconds | quote }}
+  DISPATCHER_RECONCILE_S: {{ .Values.dispatcher.reconcileSeconds | quote }}
+  DISPATCHER_HEADROOM_CPU_MILLI: {{ .Values.dispatcher.headroomCpuMilli | quote }}
+  DISPATCHER_HEADROOM_MEM_BYTES: {{ .Values.dispatcher.headroomMemBytes | quote }}
   {{- if .Values.observability.prometheusUrl }}
   PROMETHEUS_URL: {{ .Values.observability.prometheusUrl | quote }}
   {{- end }}

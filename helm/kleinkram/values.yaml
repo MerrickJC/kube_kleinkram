@@ -3,11 +3,14 @@
 # This chart assumes the following are ALREADY INSTALLED in the target
 # cluster and does NOT configure them:
 #   - Kubernetes (K3s)
-#   - Kueue (controller + CRDs) - this chart creates Kleinkram-specific
-#     ResourceFlavor/ClusterQueue/LocalQueue objects on top of Kueue
 #   - Argo Workflows (workflow-controller + Argo Server) - this chart only
 #     configures the S3 artifact repository it reads from
 #   - Postgres and SeaweedFS, with reasonable configurations
+#
+# Scheduling/admission for Action Workflows is NOT delegated to Kueue -
+# the locality dispatcher (dispatcher: below) does its own capacity
+# accounting from live Node/Pod state and only submits a Workflow once a
+# specific node's free capacity is confirmed.
 #
 # Optionally, you can also install a policy engine (Kyverno or Gatekeeper)
 # for the image allow-list under `policy:` below. This is not deployed by
@@ -135,14 +138,68 @@ queueConsumer:
   probePath: /health
   # Defaults below match the fallback values already in the code
   actionsNamespace: kleinkram-actions
-  kueueLocalQueue: kleinkram-actions
   argoArtifactRepositoryConfigMap: kleinkram-artifact-repository
   # Extra annotations on the Deployment object itself, merged with commonAnnotations
   annotations: {}
   # Extra annotations on the Pod template (spec.template.metadata.annotations)
   podAnnotations: {}
 
-# This is the identity the Action containers themselves run as and has NO RBAC bindings. 
+# Locality dispatcher: a second, singleton Deployment of the same
+# queue-consumer image, with ACTION_DISPATCHER_ENABLED=true, that holds the
+# Action backlog in Postgres and dispatches each Action to a specific node
+# only once that node confirms free capacity - replacing Kueue admission and
+# the tiered node-affinity Argo template. See queueConsumer/src/actions/dispatcher
+# and _my_thoughts/data-locality-scheduling.md for the design this implements.
+dispatcher:
+  enabled: true
+  serviceAccountName: kleinkram-action-dispatcher
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: '1', memory: 1Gi }
+  # Extra runtime estimate used before a node has any completion history
+  # yet (throughput = concurrency / avgRuntimeSeconds, spec §8.3)
+  avgRuntimeSeconds: 600
+  # Extra runtime a cache miss costs - the one knob that trades dispatch
+  # latency against cache-hit rate (spec §8.3/§8.6). Measure this for real
+  # workloads before tuning away from the default.
+  missPenaltySeconds: 60
+  # How long a node's un-fitting head-of-queue job must wait before that
+  # node is blocked for backfill/steals, so it isn't starved forever by a
+  # stream of smaller jobs (spec §8.4)
+  reserveAfterSeconds: 300
+  # Cluster-wide cap on simultaneously head-of-line-blocked nodes - at a
+  # small node count, blocking more than this idles too much of the cluster
+  maxBlockedNodes: 1
+  # How long a dispatched-but-not-yet-observed job's capacity reservation
+  # is held before being cleared and reconciled (spec §7 "in-flight")
+  inflightTtlSeconds: 300
+  # How long a dispatched Workflow's pod may sit Pending before the
+  # dispatcher's capacity estimate is treated as wrong and it's requeued
+  pendingTimeoutSeconds: 600
+  # After this many requeue attempts (pending timeout or a submit error),
+  # an Action is marked UNPROCESSABLE instead of retried again
+  maxAttempts: 3
+  # Home node + up to (fallbackDepth - 1) fallbacks are computed per job
+  # (spec §8.1 "Fallback list")
+  fallbackDepth: 3
+  # Debounces coalescing rapid-fire triggers into one dispatch cycle/rerank
+  cycleDebounceMs: 250
+  nodeChangeDebounceSeconds: 10
+  # Safety-net periodic ticks, independent of event-driven triggers
+  resyncSeconds: 30
+  reconcileSeconds: 300
+  # Capacity headroom reserved on every node, on top of allocatable minus
+  # actual pod requests, protecting system/DaemonSet pods from a
+  # capacity-estimate error
+  headroomCpuMilli: 500
+  # In raw bytes (not a Kubernetes quantity string) - 1Gi below
+  headroomMemBytes: 1073741824
+  # Extra annotations on the Deployment object itself, merged with commonAnnotations
+  annotations: {}
+  # Extra annotations on the Pod template (spec.template.metadata.annotations)
+  podAnnotations: {}
+
+# This is the identity the Action containers themselves run as and has NO RBAC bindings.
 # It mainly carries imagePullSecrets for Action images pulled from a private registry
 actions:
   serviceAccountName: kleinkram-action-pod
@@ -278,91 +335,23 @@ ingress:
     enabled: false
     secretName: kleinkram-tls
 
-kueue:
-  clusterQueueName: kleinkram-cluster-queue
-  localQueueName: kleinkram-actions
-  resourceFlavors:
-    cpu:
-      name: cpu-default
-      # No node selector by default means pods can bind to any node. Adjust as needed
-      nodeSelector: {}
-      # No tolerations by default. Set these if CPU action pods need to schedule
-      # onto tainted nodes (e.g. a dedicated action node pool)
-      tolerations: []
-    gpu:
-      name: gpu-default
-      # Must match the node label applied to the GPU node pool, and the NVIDIA device
-      # plugin DaemonSet must already be running there. Adjust nodeSelector/tolerations
-      # to match
-      nodeSelector:
-        gpu: 'true'
-      tolerations:
-        - key: nvidia.com/gpu
-          operator: Exists
-          effect: NoSchedule
-  # sample quotas. These numbers are examples only - replace them with your
-  # own cluster's real capacity. Kueue only enforces quota; it has no
-  # visibility into per-node fit, so if this is set higher than the cluster
-  # can actually run, excess pods go Pending in the scheduler instead of
-  # waiting gated in Kueue, and Kueue's waitForPodsReady (see
-  # docs/development/kubernetes-deployment.md) never sees them to evict and
-  # retry. Size each resource as: sum of node allocatable (not capacity) for
-  # the nodes this queue's ResourceFlavor can use, minus DaemonSet requests
-  # and other namespaces' pods on those nodes, minus a headroom margin. Do
-  # not raise this via a cohort/borrowing beyond what the cluster actually
-  # has. Re-measure and update whenever nodes are added or removed.
-  quota:
-    cpu:
-      cpu: '16'
-      memory: 64Gi
-      # Covers the emptyDir mounted at /out for Action containers (see
-      # workflow-dispatch.service.ts). Kueue refuses to admit a pod
-      # requesting a resource that isn't in the ClusterQueue's
-      # coveredResources, so this must stay in sync with
-      # ACTION_OUTPUT_VOLUME_SIZE_LIMIT times expected concurrent actions.
-      ephemeralStorage: 500Gi
-    gpu:
-      nvidiaGpu: '2'
-  # Optional flag to create WorkloadPriorityClasses
-  priorityClasses:
-    enabled: true
-
-# Locality-scheduled S3 cache: required, tiered node-affinity toward
-# whichever node's local JuiceFS gateway already caches an Action's mission
-# data, with a weighted preference layered on top of every tier's hard
-# requirement so that if several of a tier's allowed nodes are free at
-# once, the best-ranked one still wins rather than it being arbitrary.
-# None of the gateway/cache infrastructure itself is deployed by this
-# chart, this only tells the Action Operator which node labels to look for
-# and how to widen from the best-ranked node out to the rest of the
-# cache-tier pool if it's full. A pod never falls back to scheduling on
-# cluster-core nodes outside this pool - every tier (including the final
-# one) stays scoped to nodeLabelSelector (+ gpuNodeLabelSelector for GPU
-# actions). This requires Kueue's waitForPodsReady to be configured on the
-# Kueue installation (not by this chart - see
-# docs/development/kubernetes-deployment.md), otherwise a pod stuck on an
-# unschedulable tier is never evicted/retried into the next one.
+# The locality dispatcher's eligible-node pool (ClusterStateService):
+# whichever nodes run a node-local JuiceFS gateway with a cache disk. None
+# of that gateway/cache infrastructure itself is deployed by this chart -
+# this only tells the dispatcher which node labels/taint to rank, dispatch,
+# and tolerate against. A job's home node (and steal targets) are never
+# chosen outside this pool.
 locality:
-  enabled: true
   # Must match the label applied to nodes running a node-local JuiceFS
   # gateway with a cache disk
   nodeLabelSelector: 'cache-tier=true'
-  # Must match kueue.resourceFlavors.gpu.nodeSelector above, so a GPU
-  # action's affinity is only ever pointed at nodes it can actually
-  # schedule onto. Keep these two in sync if you change the GPU node label.
+  # Must match the label applied to the GPU node pool, and the NVIDIA
+  # device plugin DaemonSet must already be running there
   gpuNodeLabelSelector: 'gpu=true'
-  # Ascending sizes of the strict, ranked-hostname tiers (top 1, top 2,
-  # top 4, ...) an Action run steps through - each capped at the number of
-  # eligible nodes actually found - before falling back to a final tier
-  # scoped to the whole cache-tier pool via nodeLabelSelector. Higher
-  # values/more tiers add resilience if top-ranked nodes are often full, at
-  # the cost of diluting cache concentration and a longer worst-case wait
-  # before a pod reaches an unconstrained-within-the-pool tier
-  tierSizes: '1,2,4'
-  # Retry limit for the final tier, so a Kueue waitForPodsReady eviction
-  # there (the whole cache-tier pool momentarily full) is retried in place
-  # rather than failing the Action
-  fallbackRetryLimit: 20
+  # Must match the taint applied to the GPU node pool (so nothing lands
+  # there by accident) - the dispatcher adds the matching toleration
+  # directly to GPU Actions' pods (WorkflowDispatchService.submitForDispatcher)
+  gpuTaintKey: 'nvidia.com/gpu'
 
 argo:
   artifactRepository:

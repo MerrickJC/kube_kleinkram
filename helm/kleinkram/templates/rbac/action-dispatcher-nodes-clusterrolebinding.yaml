@@ -1,0 +1,20 @@
+{{- if .Values.dispatcher.enabled }}
+# Reuses the existing kleinkram-action-operator-nodes ClusterRole (node
+# get/list/watch) for the dispatcher's own ServiceAccount - ClusterStateService
+# watches the same cache-tier-labelled node pool the old tiered-affinity code
+# used to list.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kleinkram-action-dispatcher-nodes
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.dispatcher.serviceAccountName }}
+    namespace: {{ .Values.namespaces.app }}
+roleRef:
+  kind: ClusterRole
+  name: kleinkram-action-operator-nodes
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

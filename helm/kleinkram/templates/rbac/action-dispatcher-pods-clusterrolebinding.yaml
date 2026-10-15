@@ -1,17 +1,16 @@
-{{- if .Values.locality.enabled }}
-# Needed for locality-aware node affinity
+{{- if .Values.dispatcher.enabled }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: kleinkram-action-operator-nodes
+  name: kleinkram-action-dispatcher-pods
   labels:
     {{- include "kleinkram.labels" . | nindent 4 }}
 subjects:
   - kind: ServiceAccount
-    name: {{ .Values.queueConsumer.serviceAccountName }}
+    name: {{ .Values.dispatcher.serviceAccountName }}
     namespace: {{ .Values.namespaces.app }}
 roleRef:
   kind: ClusterRole
-  name: kleinkram-action-operator-nodes
+  name: kleinkram-action-dispatcher-pods
   apiGroup: rbac.authorization.k8s.io
 {{- end }}

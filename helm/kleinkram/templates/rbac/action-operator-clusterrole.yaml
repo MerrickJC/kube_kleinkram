@@ -1,6 +1,8 @@
-# A ClusterRole (so it can be reused/versioned once), which is only ever
-# bound to the namespaced kleinkram-action-operator RoleBinding. Provides
-# a least-privilege grant onto exactly the objects the Action Operator needs
+# A ClusterRole (so it can be reused/versioned once), bound to two
+# namespaced RoleBindings: kleinkram-action-operator (queue-consumer) and
+# kleinkram-action-dispatcher (the locality dispatcher, which also builds
+# and submits Workflows itself once it decides on a node). Provides
+# a least-privilege grant onto exactly the objects either needs
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

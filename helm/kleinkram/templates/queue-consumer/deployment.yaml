@@ -41,6 +41,12 @@ spec:
           env:
             - name: SERVER_PORT
               value: {{ .Values.queueConsumer.port | quote }}
+            # The locality dispatcher runs as its own singleton Deployment
+            # (action-dispatcher/deployment.yaml) - explicit here so it's
+            # never accidentally also active on a horizontally-scaled
+            # queue-consumer replica.
+            - name: ACTION_DISPATCHER_ENABLED
+              value: 'false'
             {{- include "kleinkram.secretEnv" . | nindent 12 }}
           volumeMounts:
             - name: google-service-account

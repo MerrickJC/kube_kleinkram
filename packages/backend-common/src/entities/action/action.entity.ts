@@ -6,6 +6,8 @@ import { MissionEntity } from '@backend-common/entities/mission/mission.entity';
 import { UserEntity } from '@backend-common/entities/user/user.entity';
 import { RuntimeDescription } from '@backend-common/types';
 import {
+    ActionDispatchKind,
+    ActionDispatchState,
     ActionErrorHint,
     ActionState,
     ActionTriggerSource,
@@ -171,4 +173,32 @@ export class ActionEntity extends BaseEntity {
 
     @Column({ type: 'float', nullable: true })
     efficiencyScore?: number;
+
+    // Locality dispatcher bookkeeping (orthogonal to `state` above). Null
+    // means "not using the dispatcher" - a legacy row, or the dispatcher is
+    // disabled and WorkflowDispatchService submitted directly as before.
+    @Index()
+    @Column({ type: 'enum', enum: ActionDispatchState, nullable: true })
+    dispatchState?: ActionDispatchState;
+
+    @Column({ nullable: true })
+    homeNode?: string;
+
+    // Set when the Workflow is actually created (unlike executionStartedAt,
+    // which WorkflowWatchService only sets once the pod reaches Running) -
+    // needed to detect a pod stuck Pending past PENDING_TIMEOUT_S.
+    @Column({ nullable: true })
+    dispatchedAt?: Date;
+
+    @Column({ nullable: true })
+    dispatchNode?: string;
+
+    @Column({ type: 'enum', enum: ActionDispatchKind, nullable: true })
+    dispatchKind?: ActionDispatchKind;
+
+    @Column({ type: 'int', default: 0 })
+    dispatchAttempt!: number;
+
+    @Column({ nullable: true })
+    lastDispatchError?: string;
 }

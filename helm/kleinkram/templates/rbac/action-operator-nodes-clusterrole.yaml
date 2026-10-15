@@ -1,5 +1,9 @@
-{{- if .Values.locality.enabled }}
-# Needed for locality-aware node affinity
+{{- if .Values.dispatcher.enabled }}
+# Needed by the locality dispatcher's ClusterStateService to watch the
+# eligible (cache-tier-labelled) node pool. Only bound to the dispatcher's
+# own ServiceAccount (action-dispatcher-nodes-clusterrolebinding.yaml) -
+# queue-consumer no longer lists nodes itself since the tiered-affinity
+# code was removed.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

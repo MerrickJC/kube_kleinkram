@@ -113,7 +113,7 @@ describe('WorkflowWatchService', () => {
             );
         });
 
-        test('Running does not transition to PROCESSING while the Pod node is still Pending (e.g. awaiting Kueue admission)', async () => {
+        test('Running does not transition to PROCESSING while the Pod node is still Pending (e.g. awaiting node capacity)', async () => {
             (actionRepo.findOne as jest.Mock).mockResolvedValue({
                 uuid: actionUuid,
                 state: ActionState.STARTING,
@@ -289,32 +289,16 @@ describe('WorkflowWatchService', () => {
     });
 
     describe('locality-landed rank metric', () => {
-        const runningWorkflow = (preferredNodeNames: string[]) => ({
-            metadata: { labels: workflowLabels(actionUuid) },
-            spec: {
-                templates: [
-                    {
-                        podSpecPatch: JSON.stringify({
-                            affinity: {
-                                nodeAffinity: {
-                                    preferredDuringSchedulingIgnoredDuringExecution:
-                                        preferredNodeNames.map((name) => ({
-                                            weight: 100,
-                                            preference: {
-                                                matchExpressions: [
-                                                    {
-                                                        key: 'kubernetes.io/hostname',
-                                                        operator: 'In',
-                                                        values: [name],
-                                                    },
-                                                ],
-                                            },
-                                        })),
-                                },
-                            },
-                        }),
-                    },
-                ],
+        // The dispatcher pins a pod to exactly one decided node (spec §9.2)
+        // and labels the Workflow with it directly - no more ranked
+        // preference list to recover from podSpecPatch (see
+        // WorkflowDispatchService.buildWorkflowManifest / Phase 5 cutover).
+        const runningWorkflow = (homeNode: string | undefined) => ({
+            metadata: {
+                labels: {
+                    ...workflowLabels(actionUuid),
+                    ...(homeNode ? { 'kleinkram.local/home-node': homeNode } : {}),
+                },
             },
             status: {
                 phase: 'Running',
@@ -329,7 +313,7 @@ describe('WorkflowWatchService', () => {
             },
         });
 
-        test('records rank "1" when the pod landed on the top-ranked node', async () => {
+        test('records rank "1" when the pod landed on its home node', async () => {
             (actionRepo.findOne as jest.Mock).mockResolvedValue({
                 uuid: actionUuid,
                 state: ActionState.STARTING,
@@ -338,9 +322,7 @@ describe('WorkflowWatchService', () => {
                 items: [{ spec: { nodeName: 'node-a' } }],
             });
 
-            await asPrivate(service).handleEvent(
-                runningWorkflow(['node-a', 'node-b', 'node-c']),
-            );
+            await asPrivate(service).handleEvent(runningWorkflow('node-a'));
 
             expect(mockListNamespacedPod).toHaveBeenCalledWith(
                 expect.objectContaining({
@@ -352,36 +334,32 @@ describe('WorkflowWatchService', () => {
             });
         });
 
-        test('records rank "3" when the pod landed on the third-ranked node', async () => {
+        test('records rank "other" when the pod landed away from its home node (a steal)', async () => {
             (actionRepo.findOne as jest.Mock).mockResolvedValue({
                 uuid: actionUuid,
                 state: ActionState.STARTING,
             });
             mockListNamespacedPod.mockResolvedValue({
-                items: [{ spec: { nodeName: 'node-c' } }],
+                items: [{ spec: { nodeName: 'node-b' } }],
             });
 
-            await asPrivate(service).handleEvent(
-                runningWorkflow(['node-a', 'node-b', 'node-c']),
-            );
+            await asPrivate(service).handleEvent(runningWorkflow('node-a'));
 
             expect(localityLandedRank.inc).toHaveBeenCalledWith({
-                rank: '3',
+                rank: 'other',
             });
         });
 
-        test('records rank "other" when the pod landed outside the ranked list', async () => {
+        test('records rank "other" when the Workflow carries no home-node label at all', async () => {
             (actionRepo.findOne as jest.Mock).mockResolvedValue({
                 uuid: actionUuid,
                 state: ActionState.STARTING,
             });
             mockListNamespacedPod.mockResolvedValue({
-                items: [{ spec: { nodeName: 'unranked-node' } }],
+                items: [{ spec: { nodeName: 'node-a' } }],
             });
 
-            await asPrivate(service).handleEvent(
-                runningWorkflow(['node-a', 'node-b']),
-            );
+            await asPrivate(service).handleEvent(runningWorkflow(undefined));
 
             expect(localityLandedRank.inc).toHaveBeenCalledWith({
                 rank: 'other',
@@ -395,9 +373,7 @@ describe('WorkflowWatchService', () => {
             });
             mockListNamespacedPod.mockResolvedValue({ items: [] });
 
-            await asPrivate(service).handleEvent(
-                runningWorkflow(['node-a', 'node-b']),
-            );
+            await asPrivate(service).handleEvent(runningWorkflow('node-a'));
 
             expect(localityLandedRank.inc).toHaveBeenCalledWith({
                 rank: 'unknown',
@@ -413,9 +389,7 @@ describe('WorkflowWatchService', () => {
                 items: [{ spec: { nodeName: 'node-a' } }],
             });
 
-            await asPrivate(service).handleEvent(
-                runningWorkflow(['node-a', 'node-b']),
-            );
+            await asPrivate(service).handleEvent(runningWorkflow('node-a'));
 
             expect(localityLandedRank.inc).not.toHaveBeenCalled();
         });

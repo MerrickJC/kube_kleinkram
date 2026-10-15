@@ -100,6 +100,20 @@ export enum ActionState {
     CANCELLED = 'CANCELLED',
 }
 
+// Internal to the locality dispatcher - orthogonal to ActionState. null/undefined
+// means "not using the dispatcher" (legacy row, or dispatcher disabled), so existing
+// rows and a disabled dispatcher need no backfill.
+export enum ActionDispatchState {
+    QUEUED = 'QUEUED',
+    DISPATCHING = 'DISPATCHING',
+    DISPATCHED = 'DISPATCHED',
+}
+
+export enum ActionDispatchKind {
+    LOCAL = 'local',
+    STEAL = 'steal',
+}
+
 export enum KeyTypes {
     ACTION = 'ACTION',
 }

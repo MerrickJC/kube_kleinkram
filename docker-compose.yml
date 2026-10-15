@@ -1,6 +1,6 @@
 # This file describes the local dev environment for Kleinkram
 # It is intended to be run using docker compose up --build --watch
-# Note: Actions execution now requires Kubernetes/Argo Workflows/Kueue
+# Note: Actions execution now requires Kubernetes/Argo Workflows
 services:
     base:
         image: kleinkram-base

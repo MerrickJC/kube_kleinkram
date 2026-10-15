@@ -1,0 +1,80 @@
+{{- if .Values.dispatcher.enabled }}
+# The locality dispatcher (queueConsumer/src/actions/dispatcher): a second,
+# singleton Deployment of the same queue-consumer image, with
+# ACTION_DISPATCHER_ENABLED=true, that holds the Action backlog in
+# Postgres and dispatches each Action to a specific node only once that
+# node confirms free capacity - replacing Kueue admission and the tiered
+# node-affinity Argo template entirely. `replicas: 1` / `strategy: Recreate`
+# and no HPA: LeaderLockService's Redlock guard assumes exactly one active
+# instance, and a cluster-wide Pod informer (ClusterStateService) in
+# multiple replicas would multiply watch/memory cost for no benefit.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kleinkram-action-dispatcher
+  namespace: {{ .Values.namespaces.app }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+    app.kubernetes.io/component: action-dispatcher
+  {{- with include "kleinkram.annotations" (dict "root" $ "local" .Values.dispatcher.annotations) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "kleinkram.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: action-dispatcher
+  template:
+    metadata:
+      labels:
+        {{- include "kleinkram.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: action-dispatcher
+      {{- with include "kleinkram.annotations" (dict "root" $ "local" .Values.dispatcher.podAnnotations) }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ .Values.dispatcher.serviceAccountName }}
+      {{- if .Values.image.pullSecrets -}}
+      {{- include "kleinkram.imagePullSecrets" .Values.image.pullSecrets | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: action-dispatcher
+          image: {{ include "kleinkram.image" (dict "root" $ "service" "queue-consumer") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.queueConsumer.port }}
+          envFrom:
+            - configMapRef: { name: kleinkram-config }
+          env:
+            - name: SERVER_PORT
+              value: {{ .Values.queueConsumer.port | quote }}
+            - name: ACTION_DISPATCHER_ENABLED
+              value: 'true'
+            {{- include "kleinkram.secretEnv" . | nindent 12 }}
+          volumeMounts:
+            - name: google-service-account
+              mountPath: /app/secrets
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: {{ .Values.queueConsumer.probePath }}, port: {{ .Values.queueConsumer.port }} }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: {{ .Values.queueConsumer.probePath }}, port: {{ .Values.queueConsumer.port }} }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.dispatcher.resources | nindent 12 }}
+      volumes:
+        - name: google-service-account
+          secret:
+            secretName: {{ .Values.secretNames.googleServiceAccount }}
+            items:
+              - key: {{ .Values.secretKeys.googleServiceAccount }}
+                path: google-service-account.json
+{{- end }}

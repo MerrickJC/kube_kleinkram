@@ -35,6 +35,7 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus';
 import * as pg from 'pg';
 import { AccessGroupExpiryProvider } from './accessGroupExpiry/access-group-expiry.provider';
 import { ActionsModule } from './actions/actions.module';
+import { DispatcherModule } from './actions/dispatcher/dispatcher.module';
 import { FileProcessorModule } from './file-processor/file-processor.module';
 import { FileCleanupQueueProcessorProvider } from './fileCleanup/file-cleanup-queue-processor.provider';
 import { HealthModule } from './health/health.module';
@@ -51,6 +52,7 @@ import { TriggerProcessorModule } from './trigger-processor/trigger-processor.mo
         }),
 
         ActionsModule,
+        DispatcherModule,
         FileProcessorModule,
         TriggerProcessorModule,
         BullModule.registerQueue({

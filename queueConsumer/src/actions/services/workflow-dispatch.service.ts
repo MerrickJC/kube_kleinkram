@@ -10,17 +10,21 @@ import {
 } from '@kleinkram/backend-common/modules/action-dispatcher/action-queue.constants';
 import {
     AccessGroupRights,
+    ActionDispatchKind,
     ActionState,
     KeyTypes,
     UserRole,
 } from '@kleinkram/shared';
-import type { V1Node } from '@kubernetes/client-node';
 import { OnQueueFailed, Process, Processor } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Job } from 'bull';
 import { Repository } from 'typeorm';
 import logger from '../../logger';
+import { DispatchStoreService } from '../dispatcher/dispatch-store.service';
+import { dispatcherEnabled, outputVolumeSizeLimit } from '../dispatcher/dispatcher.config';
+import type { SubmittedWorkflow } from '../dispatcher/locality-dispatcher.service';
+import { publishDispatchWake } from '../dispatcher/wake-channel';
 import { DisposableAPIKey } from '../helper/disposable-api-key';
 import {
     ACTION_MANAGED_BY_LABEL_KEY,
@@ -34,26 +38,12 @@ import {
     ARGO_VERSION,
     getCoreV1Api,
     getCustomObjectsApi,
-    isNodeReadySchedulable,
-    labelSelectorToMatchExpressions,
-    listCacheTierNodes,
-    localityEnabled,
-    localityFallbackRetryLimit,
-    localityGpuNodeLabelSelector,
-    localityNodeLabelSelector,
-    localityTierSizes,
-    type NodeSelectorRequirement,
+    gpuTaintKey,
     WORKFLOW_PLURAL,
     workflowNameForAction,
 } from '../helper/kube-client';
-import { rankNodes } from '../helper/rendezvous-hash';
 import { ImageResolutionService } from './image-resolution.service';
 
-// Cluster membership is assumed stable on the order of minutes, so this just
-// avoids a Kubernetes API round-trip on every single dispatch.
-const NODE_LIST_CACHE_TTL_MS = 30_000;
-
-const KUEUE_LOCAL_QUEUE = process.env.KUEUE_LOCAL_QUEUE ?? 'kleinkram-actions';
 const ARTIFACT_REPOSITORY_CONFIGMAP =
     process.env.ARGO_ARTIFACT_REPOSITORY_CONFIGMAP ??
     'kleinkram-artifact-repository';
@@ -62,25 +52,21 @@ const ARTIFACT_REPOSITORY_CONFIGMAP =
 // /out is backed by an emptyDir volume instead. The size limit is fixed for
 // now since ActionTemplateEntity has no per-template disk quota field.
 const OUTPUT_VOLUME_NAME = 'out';
-const OUTPUT_VOLUME_SIZE_LIMIT =
-    process.env.ACTION_OUTPUT_VOLUME_SIZE_LIMIT ?? '10Gi';
+const OUTPUT_VOLUME_SIZE_LIMIT = outputVolumeSizeLimit();
 
-interface PreferredAffinityTerm {
-    weight: number;
-    preference: {
-        matchExpressions: { key: string; operator: 'In'; values: string[] }[];
-    };
-}
+const KLEINKRAM_LOCAL_LABEL_PREFIX = 'kleinkram.local';
 
 /**
- * Consumes `submit-action` jobs from the dispatch queue and turns an
- * ActionEntity into an Argo Workflow
+ * Consumes `submit-action` jobs from the dispatch queue. Also the
+ * dispatcher's real WorkflowSubmitter (see submitForDispatcher below and
+ * dispatcher.module.ts's WORKFLOW_SUBMITTER provider) - once
+ * ACTION_DISPATCHER_ENABLED is true, `submit()` no longer builds a Workflow
+ * itself; it only hands the job to the dispatcher, which calls back into
+ * submitForDispatcher once it has decided on a node.
  */
 @Processor(ACTION_DISPATCH_QUEUE_NAME)
 @Injectable()
 export class WorkflowDispatchService {
-    private nodeCache: { nodes: V1Node[]; expiresAt: number } | undefined;
-
     constructor(
         @InjectRepository(ActionEntity)
         private actionRepository: Repository<ActionEntity>,
@@ -88,6 +74,7 @@ export class WorkflowDispatchService {
         private apikeyRepository: Repository<ApiKeyEntity>,
         private accessControlService: AccessControlService,
         private readonly imageResolutionService: ImageResolutionService,
+        private readonly dispatchStore: DispatchStoreService,
     ) {}
 
     @Process({ name: ActionQueueJob.SUBMIT, concurrency: 5 })
@@ -131,13 +118,22 @@ export class WorkflowDispatchService {
             return;
         }
 
+        if (dispatcherEnabled()) {
+            // LocalityDispatcherService now owns getting this Action a node
+            // and calling submitForDispatcher() below - this job is done
+            // once the row is marked QUEUED.
+            await this.dispatchStore.markQueued(action.uuid, '');
+            await publishDispatchWake();
+            return;
+        }
+
         const apiKey = await this.mintApiKeySecret(action);
         const image = await this.imageResolutionService.resolveImageDigest(
             action.template.image_name,
         );
 
         const workflowName = workflowNameForAction(action.uuid);
-        const manifest = await this.buildWorkflowManifest(
+        const manifest = this.buildWorkflowManifest(
             action,
             action.template,
             workflowName,
@@ -159,7 +155,7 @@ export class WorkflowDispatchService {
         await this.actionRepository.update(action.uuid, {
             state: ActionState.STARTING,
             // eslint-disable-next-line @typescript-eslint/naming-convention
-            state_cause: 'Workflow submitted, waiting for Kueue admission',
+            state_cause: 'Workflow submitted',
             workflowName,
             image,
         });
@@ -167,6 +163,67 @@ export class WorkflowDispatchService {
         logger.info(
             `Submitted Argo Workflow ${workflowName} for action ${action.uuid}`,
         );
+    }
+
+    /**
+     * The dispatcher's WorkflowSubmitter (spec §9.1 steps 3-6), called by
+     * LocalityDispatcherService once it has claimed this Action for `node`.
+     * Access is re-checked here (not just at submit() time), since a queued
+     * job may have waited - the spec explicitly calls for this ("Access is
+     * checked both at submission time and again just before the workflow
+     * starts").
+     */
+    async submitForDispatcher(actionUuid: string, node: string): Promise<SubmittedWorkflow> {
+        const action = await this.actionRepository.findOneOrFail({
+            where: { uuid: actionUuid },
+            relations: { template: true, mission: { project: true }, creator: true },
+        });
+        if (!action.mission || !action.template || !action.creator) {
+            throw new Error(`Action ${actionUuid} is missing required relations`);
+        }
+
+        const canAccess = await this.accessControlService.canAccessMission(
+            { uuid: action.creator.uuid, role: action.creator.role ?? UserRole.USER },
+            action.mission,
+            AccessGroupRights.WRITE,
+        );
+        if (!canAccess) {
+            await this.actionRepository.update(action.uuid, {
+                state: ActionState.FAILED,
+                // eslint-disable-next-line @typescript-eslint/naming-convention
+                state_cause: `User ${action.creator.uuid} lost access to mission ${action.mission.uuid} before dispatch`,
+            });
+            throw new Error(`Access to mission ${action.mission.uuid} was revoked before dispatch`);
+        }
+
+        const apiKey = await this.mintApiKeySecret(action);
+        const image = await this.imageResolutionService.resolveImageDigest(action.template.image_name);
+        const workflowName = workflowNameForAction(action.uuid);
+        const manifest = this.buildWorkflowManifest(action, action.template, workflowName, node);
+
+        try {
+            await getCustomObjectsApi().createNamespacedCustomObject({
+                group: ARGO_GROUP,
+                version: ARGO_VERSION,
+                namespace: actionsNamespace(),
+                plural: WORKFLOW_PLURAL,
+                body: manifest,
+            });
+        } catch (error) {
+            await apiKey[Symbol.asyncDispose]();
+            throw error;
+        }
+
+        await this.actionRepository.update(action.uuid, {
+            state: ActionState.STARTING,
+            // eslint-disable-next-line @typescript-eslint/naming-convention
+            state_cause: 'Workflow submitted',
+            workflowName,
+            image,
+        });
+
+        logger.info(`Submitted Argo Workflow ${workflowName} for action ${action.uuid} pinned to node ${node}`);
+        return { workflowName };
     }
 
     @OnQueueFailed()
@@ -228,179 +285,21 @@ export class WorkflowDispatchService {
     }
 
     /**
-     * Returns the cache-tier node list (nodes matching
-     * `localityNodeLabelSelector()`), refetching only after
-     * NODE_LIST_CACHE_TTL_MS has elapsed since the last successful fetch.
+     * Builds the Argo Workflow manifest. When `node` is given (the
+     * dispatcher has decided where this Action should run), the pod is
+     * hard-pinned there and carries the dispatcher's own labels. When
+     * `node` is omitted (the dispatcher is disabled), the pod is submitted
+     * entirely unconstrained - no node pinning and no admission/quota
+     * control at all (Kueue is no longer used), so this fallback path is
+     * only appropriate when the dispatcher isn't running (e.g. local dev).
      */
-    private async getCacheTierNodes(): Promise<V1Node[]> {
-        const now = Date.now();
-        if (this.nodeCache && this.nodeCache.expiresAt > now) {
-            return this.nodeCache.nodes;
-        }
-        const nodes = await listCacheTierNodes(localityNodeLabelSelector());
-        this.nodeCache = { nodes, expiresAt: now + NODE_LIST_CACHE_TTL_MS };
-        return nodes;
-    }
-
-    /**
-     * Computes the ranked, strict locality tiers (top 1, top 2, top 4, ...
-     * cache-tier nodes by rendezvous hash on `missionUuid`) plus the final
-     * tier's label-selector matchExpressions, so an Action pod widens from
-     * a hard requirement on its best-ranked JuiceFS-cache node out to the
-     * full cache-tier pool rather than silently landing anywhere once the
-     * top-ranked nodes are full. Also computes a shared, weighted preferred
-     * ranking (same formula as the old soft-only affinity) that's layered
-     * onto every tier's required constraint, so if several of a tier's
-     * allowed nodes happen to be free at once, the scheduler still leans
-     * toward the best-ranked one rather than picking among them arbitrarily.
-     *
-     * Returns undefined on any error, disablement, or when no eligible
-     * node is found at all (no affinity added, workflow dispatches as a
-     * single unconstrained step, same as before this feature existed)
-     */
-    private async computeLocalityTiers(
-        missionUuid: string,
-        wantsGpu: boolean,
-    ): Promise<
-        | {
-              strictTiers: string[][];
-              finalSelectorExpressions: NodeSelectorRequirement[];
-              preferredTerms: PreferredAffinityTerm[];
-          }
-        | undefined
-    > {
-        if (!localityEnabled()) return undefined;
-
-        let nodes: V1Node[];
-        try {
-            nodes = await this.getCacheTierNodes();
-        } catch (error) {
-            logger.warn(
-                `Failed to list cache-tier nodes, skipping locality affinity: ${String(error)}`,
-            );
-            return undefined;
-        }
-
-        const schedulable = nodes.filter((node) =>
-            isNodeReadySchedulable(node),
-        );
-        const eligible = wantsGpu
-            ? schedulable.filter((node) => {
-                  const selector = localityGpuNodeLabelSelector();
-                  const eqIndex = selector.indexOf('=');
-                  const gpuLabelKey =
-                      eqIndex === -1 ? selector : selector.slice(0, eqIndex);
-                  const gpuLabelValue =
-                      eqIndex === -1 ? '' : selector.slice(eqIndex + 1);
-                  return node.metadata?.labels?.[gpuLabelKey] === gpuLabelValue;
-              })
-            : schedulable;
-
-        const nodeNames = eligible
-            .map(
-                (node) =>
-                    node.metadata?.labels?.['kubernetes.io/hostname'] ??
-                    node.metadata?.name,
-            )
-            .filter((name): name is string => Boolean(name));
-
-        if (nodeNames.length === 0) return undefined;
-
-        const ranked = rankNodes(missionUuid, nodeNames);
-
-        const strictTiers: string[][] = [];
-        let lastSize = 0;
-        for (const size of localityTierSizes()) {
-            const cappedSize = Math.min(size, ranked.length);
-            if (cappedSize <= lastSize) continue;
-            strictTiers.push(ranked.slice(0, cappedSize));
-            lastSize = cappedSize;
-            if (cappedSize === ranked.length) break;
-        }
-
-        const finalSelectorExpressions = labelSelectorToMatchExpressions(
-            localityNodeLabelSelector(),
-        );
-        if (wantsGpu) {
-            finalSelectorExpressions.push(
-                ...labelSelectorToMatchExpressions(
-                    localityGpuNodeLabelSelector(),
-                ),
-            );
-        }
-
-        // Weights halve per rank (100, 50, 25, ...) and floor out at 1, so
-        // nodes beyond the largest configured tier size are indistinguishable
-        // anyway - cap the list there rather than weighting every eligible
-        // node for no practical benefit.
-        const preferredCap = Math.max(...localityTierSizes());
-        const preferredTerms = ranked
-            .slice(0, preferredCap)
-            .map((nodeName, rank) => ({
-                weight: Math.max(1, Math.floor(100 / 2 ** rank)),
-                preference: {
-                    matchExpressions: [
-                        {
-                            key: 'kubernetes.io/hostname',
-                            operator: 'In' as const,
-                            values: [nodeName],
-                        },
-                    ],
-                },
-            }));
-
-        return { strictTiers, finalSelectorExpressions, preferredTerms };
-    }
-
-    /**
-     * Builds a podSpecPatch combining a hard requirement (narrows the
-     * feasible node set to this tier) with the shared weighted preference
-     * (scores whichever of those nodes are actually free), so a tier never
-     * schedules outside its allowed nodes but still favors the best-ranked
-     * one among them when several are available at once.
-     */
-    private affinityPatch(
-        requiredNodeSelectorTerms: { matchExpressions: NodeSelectorRequirement[] }[],
-        preferredTerms: PreferredAffinityTerm[],
-    ): string {
-        return JSON.stringify({
-            affinity: {
-                nodeAffinity: {
-                    requiredDuringSchedulingIgnoredDuringExecution: {
-                        nodeSelectorTerms: requiredNodeSelectorTerms,
-                    },
-                    ...(preferredTerms.length > 0
-                        ? {
-                              preferredDuringSchedulingIgnoredDuringExecution:
-                                  preferredTerms,
-                          }
-                        : {}),
-                },
-            },
-        });
-    }
-
-    /**
-     * Builds a `when` expression gating a step on *none* of `stepNames`
-     * having succeeded - not just the immediately preceding one. A skipped
-     * step's status is `Skipped`, not `Succeeded`, so chaining only off the
-     * previous step (`{{steps.tier-N.status}} != Succeeded`) breaks as soon
-     * as one step is skipped: every later step would see a non-Succeeded
-     * predecessor and run anyway, even after an earlier tier already
-     * succeeded. ANDing every prior step's condition avoids that.
-     */
-    private noneSucceededCondition(stepNames: string[]): string {
-        return stepNames
-            .map((name) => `{{steps.${name}.status}} != Succeeded`)
-            .join(' && ');
-    }
-
-    private async buildWorkflowManifest(
+    private buildWorkflowManifest(
         action: ActionEntity,
         template: ActionTemplateEntity,
         workflowName: string,
+        node?: string,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ): Promise<Record<string, any>> {
+    ): Record<string, any> {
         if (!action.mission) throw new Error('Mission is undefined');
 
         const activeDeadlineSeconds = Math.max(
@@ -408,10 +307,6 @@ export class WorkflowDispatchService {
             Math.round(template.maxRuntime * 3600),
         );
         const wantsGpu = template.gpuMemory > 0;
-        const tiers = await this.computeLocalityTiers(
-            action.mission.uuid,
-            wantsGpu,
-        );
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const resources: Record<string, Record<string, any>> = {
@@ -484,7 +379,8 @@ export class WorkflowDispatchService {
         };
 
         const { entrypoint, templates } = this.buildEntrypointAndTemplates(
-            tiers,
+            node,
+            wantsGpu,
             container,
             volumes,
             outputs,
@@ -500,6 +396,15 @@ export class WorkflowDispatchService {
                     [ACTION_MANAGED_BY_LABEL_KEY]:
                         ACTION_MANAGED_BY_LABEL_VALUE,
                     [ACTION_UUID_LABEL]: action.uuid,
+                    ...(node
+                        ? {
+                              [`${KLEINKRAM_LOCAL_LABEL_PREFIX}/home-node`]:
+                                  action.homeNode ?? node,
+                              [`${KLEINKRAM_LOCAL_LABEL_PREFIX}/dispatch-node`]: node,
+                              [`${KLEINKRAM_LOCAL_LABEL_PREFIX}/dispatch-kind`]:
+                                  action.dispatchKind ?? ActionDispatchKind.LOCAL,
+                          }
+                        : {}),
                 },
             },
             spec: {
@@ -518,7 +423,6 @@ export class WorkflowDispatchService {
                 podMetadata: {
                     labels: {
                         /* eslint-disable @typescript-eslint/naming-convention */
-                        'kueue.x-k8s.io/queue-name': KUEUE_LOCAL_QUEUE,
                         action_run_uuid: action.uuid,
                         action_template_uuid: template.uuid,
                         mission_uuid: action.mission.uuid,
@@ -534,31 +438,17 @@ export class WorkflowDispatchService {
     }
 
     /**
-     * Builds the Workflow's `entrypoint` and `templates`.
-     *
-     * With no locality tiers (feature disabled, or no eligible cache-tier
-     * node found at all) this is a single unconstrained `run-action`
-     * template.
-     *
-     * With locality tiers, it's a `main` steps template chaining one step
-     * per strict ranked tier followed by a final step constrained to the
-     * live cache-tier label selector (not a frozen node list, see
-     * computeLocalityTiers). Each step's required constraint is layered
-     * with the same shared weighted preference, so if several of that
-     * step's allowed nodes are free at once, the best-ranked one still
-     * wins rather than it being arbitrary. Each step is tolerated via
-     * `continueOn` and gated with `when` so a step that doesn't succeed
-     * widens to the next tier rather than failing the workflow outright.
-     * Action containers should therefore be safe to re-run.
+     * Builds the Workflow's `entrypoint` and single `run-action` template.
+     * With `node` given: hard-pinned via `nodeSelector` (spec §9.2), plus
+     * the GPU taint's toleration if this template wants a GPU - previously
+     * implicit via Kueue's GPU ResourceFlavor (helm/kleinkram/values.yaml),
+     * which no longer admits this pod, so this must set it directly or GPU
+     * Actions would never schedule. Without `node`: unconstrained, exactly
+     * as before locality scheduling existed.
      */
     private buildEntrypointAndTemplates(
-        tiers:
-            | {
-                  strictTiers: string[][];
-                  finalSelectorExpressions: NodeSelectorRequirement[];
-                  preferredTerms: PreferredAffinityTerm[];
-              }
-            | undefined,
+        node: string | undefined,
+        wantsGpu: boolean,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         container: Record<string, any>,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -567,81 +457,26 @@ export class WorkflowDispatchService {
         outputs: Record<string, any>,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ): { entrypoint: string; templates: Record<string, any>[] } {
-        if (!tiers) {
-            return {
-                entrypoint: 'run-action',
-                templates: [
-                    { name: 'run-action', container, volumes, outputs },
-                ],
-            };
-        }
-
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const templates: Record<string, any>[] = [];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const steps: Record<string, any>[][] = [];
-        const previousStepNames: string[] = [];
-
-        for (const [index, tierNodes] of tiers.strictTiers.entries()) {
-            const stepName = `tier-${index.toString()}`;
-            const templateName = `run-action-${stepName}`;
-            templates.push({
-                name: templateName,
-                podSpecPatch: this.affinityPatch(
-                    [
-                        {
-                            matchExpressions: [
-                                {
-                                    key: 'kubernetes.io/hostname',
-                                    operator: 'In',
-                                    values: tierNodes,
-                                },
-                            ],
-                        },
-                    ],
-                    tiers.preferredTerms,
-                ),
-                container,
-                volumes,
-                outputs,
-            });
-            steps.push([
-                {
-                    name: stepName,
-                    template: templateName,
-                    continueOn: { error: true, failed: true },
-                    ...(previousStepNames.length > 0
-                        ? { when: this.noneSucceededCondition(previousStepNames) }
-                        : {}),
-                },
-            ]);
-            previousStepNames.push(stepName);
-        }
-
-        templates.push({
-            name: 'run-action-tier-cache-any',
-            podSpecPatch: this.affinityPatch(
-                [{ matchExpressions: tiers.finalSelectorExpressions }],
-                tiers.preferredTerms,
-            ),
-            retryStrategy: {
-                limit: localityFallbackRetryLimit(),
-                retryPolicy: 'Always',
-            },
+        const template: Record<string, any> = {
+            name: 'run-action',
             container,
             volumes,
             outputs,
-        });
-        steps.push([
-            {
-                name: 'tier-cache-any',
-                template: 'run-action-tier-cache-any',
-                when: this.noneSucceededCondition(previousStepNames),
-            },
-        ]);
-
-        templates.unshift({ name: 'main', steps });
-
-        return { entrypoint: 'main', templates };
+        };
+        if (node) {
+            template.podSpecPatch = JSON.stringify({
+                // eslint-disable-next-line @typescript-eslint/naming-convention
+                nodeSelector: { 'kubernetes.io/hostname': node },
+                ...(wantsGpu
+                    ? {
+                          tolerations: [
+                              { key: gpuTaintKey(), operator: 'Exists', effect: 'NoSchedule' },
+                          ],
+                      }
+                    : {}),
+            });
+        }
+        return { entrypoint: 'run-action', templates: [template] };
     }
 }

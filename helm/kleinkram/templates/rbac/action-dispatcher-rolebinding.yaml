@@ -1,0 +1,23 @@
+{{- if .Values.dispatcher.enabled }}
+# Reuses the existing kleinkram-action-operator ClusterRole (workflows
+# create/get/list/watch/delete/patch; namespaced pods/secrets) for the
+# dispatcher's own ServiceAccount - the dispatcher builds and submits
+# Workflows itself (WorkflowDispatchService.submitForDispatcher) once it
+# has decided on a node, so it needs the same namespaced grant the
+# queue-consumer's Action Operator already has.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kleinkram-action-dispatcher
+  namespace: {{ .Values.namespaces.actions }}
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.dispatcher.serviceAccountName }}
+    namespace: {{ .Values.namespaces.app }}
+roleRef:
+  kind: ClusterRole
+  name: kleinkram-action-operator
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

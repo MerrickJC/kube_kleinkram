@@ -1,0 +1,21 @@
+{{- if .Values.dispatcher.enabled }}
+# Cluster-wide (all namespaces) pod reads for ClusterStateService's capacity
+# accounting (spec §7): free capacity on an eligible node must account for
+# *every* pod bound there - DaemonSets, system pods, anything else - not
+# just Kleinkram's own, which the namespaced kleinkram-action-operator
+# ClusterRole's pod grant (scoped to kleinkram-actions only) can't see.
+# This is a genuine, deliberate privilege increase over the Kueue-based
+# system it replaces - Kueue needed no such grant, since it does its own
+# admission accounting. Read-only, and bound only to the dispatcher's own
+# ServiceAccount (see action-dispatcher-pods-clusterrolebinding.yaml).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kleinkram-action-dispatcher-pods
+  labels:
+    {{- include "kleinkram.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ['']
+    resources: ['pods']
+    verbs: ['get', 'list', 'watch']
+{{- end }}

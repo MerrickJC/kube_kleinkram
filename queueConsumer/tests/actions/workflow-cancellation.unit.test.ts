@@ -1,4 +1,5 @@
 import { Job } from 'bull';
+import { DispatchStoreService } from '../../src/actions/dispatcher/dispatch-store.service';
 import {
     actionsNamespace,
     ARGO_GROUP,
@@ -30,7 +31,10 @@ describe('WorkflowCancellationService', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        service = new WorkflowCancellationService();
+        const dispatchStoreService = {
+            clearDispatchState: jest.fn().mockResolvedValue(undefined),
+        } as unknown as DispatchStoreService;
+        service = new WorkflowCancellationService(dispatchStoreService);
     });
 
     const job = (uuid: string): Job<{ uuid: string }> =>

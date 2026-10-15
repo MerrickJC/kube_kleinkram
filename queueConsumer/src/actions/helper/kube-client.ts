@@ -19,60 +19,45 @@ export function getCustomObjectsApi(): k8s.CustomObjectsApi {
     return getKubeConfig().makeApiClient(k8s.CustomObjectsApi);
 }
 
-/**
- * Lists nodes matching `labelSelector`, e.g. the cache-tier label a cluster
- * operator applies to nodes running a node-local JuiceFS gateway
- */
-export async function listCacheTierNodes(
-    labelSelector: string,
-): Promise<k8s.V1Node[]> {
-    const response = await getCoreV1Api().listNode({ labelSelector });
-    return response.items;
+// Cluster-autoscaler taints marking a node as already on its way out -
+// never worth dispatching to even if it still reports Ready (spec §6.1)
+const AUTOSCALER_DELETION_TAINT_KEYS = new Set([
+    'ToBeDeletedByClusterAutoscaler',
+    'DeletionCandidateOfClusterAutoscaler',
+]);
+
+// The taint GPU nodes carry so nothing lands there by accident (matches
+// helm/kleinkram/values.yaml's locality.gpuTaintKey). Eligibility only
+// tolerates this one specific taint; any other NoSchedule/NoExecute taint
+// still excludes the node. WorkflowDispatchService adds the matching
+// toleration directly to GPU Actions' pods.
+export function gpuTaintKey(): string {
+    return process.env.LOCALITY_GPU_TAINT_KEY ?? 'nvidia.com/gpu';
 }
 
 /**
- * Drops nodes that are cordoned or not currently Ready, so a strict locality
- * tier never pins a pod to a node already known to be unusable - which
- * would otherwise waste a full Kueue waitForPodsReady timeout before the
- * workflow can widen to the next tier
+ * Drops nodes that are cordoned, not currently Ready, marked for removal by
+ * the cluster autoscaler, or carrying any other NoSchedule/NoExecute taint
+ * (other than the tolerated GPU taint) - so dispatch is never attempted
+ * against a node already known to be unusable
  */
 export function isNodeReadySchedulable(node: k8s.V1Node): boolean {
     if (node.spec?.unschedulable) return false;
-    return (
+    const ready =
         node.status?.conditions?.some(
             (condition) =>
                 condition.type === 'Ready' && condition.status === 'True',
-        ) ?? false
-    );
-}
+        ) ?? false;
+    if (!ready) return false;
 
-export interface NodeSelectorRequirement {
-    key: string;
-    operator: 'In';
-    values: string[];
-}
-
-/**
- * Parses a comma-separated `key=value` label selector string (the same
- * format `LOCALITY_NODE_LABEL_SELECTOR`/`LOCALITY_GPU_NODE_LABEL_SELECTOR`
- * and the Kueue ResourceFlavor nodeSelectors in helm/kleinkram/values.yaml
- * already use) into nodeAffinity matchExpressions. Used for the final
- * locality tier so it tracks the cache-tier node pool live instead of
- * freezing a point-in-time node list into the pod spec
- */
-export function labelSelectorToMatchExpressions(
-    selector: string,
-): NodeSelectorRequirement[] {
-    return selector
-        .split(',')
-        .map((pair) => pair.trim())
-        .filter((pair) => pair.length > 0)
-        .map((pair) => {
-            const eqIndex = pair.indexOf('=');
-            const key = eqIndex === -1 ? pair : pair.slice(0, eqIndex);
-            const value = eqIndex === -1 ? '' : pair.slice(eqIndex + 1);
-            return { key, operator: 'In' as const, values: [value] };
-        });
+    const tolerated = gpuTaintKey();
+    for (const taint of node.spec?.taints ?? []) {
+        if (!taint.key) continue;
+        if (AUTOSCALER_DELETION_TAINT_KEYS.has(taint.key)) return false;
+        const blocks = taint.effect === 'NoSchedule' || taint.effect === 'NoExecute';
+        if (blocks && taint.key !== tolerated) return false;
+    }
+    return true;
 }
 
 export const ARGO_GROUP = 'argoproj.io';
@@ -115,45 +100,16 @@ export const ACTION_MANAGED_BY_LABEL_VALUE = 'kleinkram-action-operator';
 export const ACTION_MANAGED_BY_LABEL_SELECTOR = `${ACTION_MANAGED_BY_LABEL_KEY}=${ACTION_MANAGED_BY_LABEL_VALUE}`;
 export const ACTION_UUID_LABEL = 'kleinkram.local/action-uuid';
 
-// Locality-aware scheduling: required node affinity, tiered and widened on
-// failure, toward whichever node's local JuiceFS gateway already caches a
-// mission's data. "No eligible nodes found" is already safe, but this flag
-// gives an explicit off switch
-export function localityEnabled(): boolean {
-    return (process.env.LOCALITY_ENABLED ?? 'true') === 'true';
-}
-
+// The cache-tier node pool the locality dispatcher ranks and dispatches
+// against (spec §6.1's NODE_SELECTOR) - nodes running a node-local JuiceFS
+// gateway, per cluster-state.service.ts and workflow-dispatch.service.ts's
+// wantsGpu check.
 export function localityNodeLabelSelector(): string {
     return process.env.LOCALITY_NODE_LABEL_SELECTOR ?? 'cache-tier=true';
 }
 
-// Match whatever label the deployment's GPU Kueue ResourceFlavor
-// actually selects on (helm/kleinkram/values.yaml's
-// kueue.resourceFlavors.gpu.nodeSelector)
+// Must match the label applied to the GPU node pool
+// (helm/kleinkram/values.yaml's locality.gpuNodeLabelSelector)
 export function localityGpuNodeLabelSelector(): string {
     return process.env.LOCALITY_GPU_NODE_LABEL_SELECTOR ?? 'gpu=true';
-}
-
-// Ascending sizes of the strict, ranked-hostname tiers (top 1, top 2,
-// top 4, ...) a locality-widening Action run steps through before
-// falling back to the full cache-tier node pool. Each size is capped at
-// the number of eligible nodes actually found
-export function localityTierSizes(): number[] {
-    const raw = process.env.LOCALITY_TIER_SIZES ?? '1,2,4';
-    const sizes = raw
-        .split(',')
-        .map((entry) => Number.parseInt(entry.trim(), 10))
-        .filter((size) => Number.isInteger(size) && size >= 1);
-    return sizes.length > 0 ? sizes : [1, 2, 4];
-}
-
-// Retry limit for the final ("any cache-tier node") locality tier, which
-// keeps retrying in place on a Kueue waitForPodsReady eviction rather than
-// failing the workflow once the cache-tier pool is momentarily full
-export function localityFallbackRetryLimit(): number {
-    const raw = Number.parseInt(
-        process.env.LOCALITY_FALLBACK_RETRY_LIMIT ?? '20',
-        10,
-    );
-    return Number.isNaN(raw) || raw < 1 ? 20 : raw;
 }

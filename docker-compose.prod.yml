@@ -1,6 +1,6 @@
 # this file described a reference production setup of Kleinkram
 
-# Note: Actions execution now requires Kubernetes/Argo Workflows/Kueue
+# Note: Actions execution now requires Kubernetes/Argo Workflows
 # This Compose stack covers the file/metadata pipeline and API/frontend
 # only, not Action runs.
 services:

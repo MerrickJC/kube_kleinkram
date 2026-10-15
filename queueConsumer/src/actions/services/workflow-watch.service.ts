@@ -38,9 +38,6 @@ interface WorkflowNode {
 
 interface WorkflowObject {
     metadata?: { name?: string; labels?: Record<string, string> };
-    // Only the one field this service reads off a template; the rest of
-    // each template (container, volumes, ...) is irrelevant here
-    spec?: { templates?: { podSpecPatch?: string }[] };
     // `nodes` is deliberately left out of this type literal (rather than
     // typed as Record<string, WorkflowNode>): ArtifactStatusService declares
     // its own unrelated WorkflowNode shape for the same `status` object, and
@@ -242,8 +239,9 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
 
         // Query Prometheus over the Pod's actual run window, not the
         // Workflow's (which starts counting as soon as Argo begins
-        // orchestrating, before Kueue admits the Pod) — otherwise the queue
-        // wait gets averaged into CPU/memory usage as if it were idle runtime.
+        // orchestrating, before the dispatcher's node capacity is actually
+        // confirmed and the pod is created) — otherwise the dispatch wait
+        // gets averaged into CPU/memory usage as if it were idle runtime.
         if (action.template && action.actionContainerStartedAt) {
             const memoryLimitBytes =
                 action.template.cpuMemory * 1024 * 1024 * 1024;
@@ -301,13 +299,19 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
     }
 
     /**
-     * Records which preference rank the Action's pod actually landed on -
-     * "1" for the single top-ranked cache-tier node, "2" for the next, and
-     * so on, "other" for a node outside the ranked list (e.g. a non-cache
-     * -tier node reached via some edge case), "unknown" if the scheduled
-     * node couldn't be resolved at all. Only called once, from the first
-     * Running transition, so each Action run contributes exactly one
-     * observation regardless of how many tiers it widened through.
+     * Records whether the Action's pod landed on the dispatcher's chosen
+     * home node: "1" if so (a local dispatch that got its cache hit), or
+     * "other" if it landed elsewhere (a steal, or a legacy/unconstrained
+     * submission with no home-node label at all), "unknown" if the
+     * scheduled node couldn't be resolved. Only called once, from the
+     * first Running transition, so each Action run contributes exactly
+     * one observation.
+     *
+     * Reads the `kleinkram.local/home-node` label the dispatcher now sets
+     * directly on the Workflow (see WorkflowDispatchService.
+     * buildWorkflowManifest) rather than recovering a ranked preference
+     * list from podSpecPatch - that list no longer exists now that a job
+     * is pinned to exactly one decided node instead of a tiered affinity.
      *
      * Uses a rank label rather than the actual node name or action UUID to
      * avoid unbounded Prometheus cardinality - this is meant to answer "is
@@ -319,8 +323,8 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
         workflow: WorkflowObject,
     ): Promise<void> {
         const nodeName = await this.resolveScheduledNodeName(actionUuid);
-        const preferredOrder = this.extractPreferredNodeOrder(workflow);
-        const rank = this.rankLabelForNode(preferredOrder, nodeName);
+        const homeNode = workflow.metadata?.labels?.['kleinkram.local/home-node'];
+        const rank = this.rankLabelForNode(homeNode, nodeName);
         this.localityLandedRank.inc({ rank });
     }
 
@@ -328,11 +332,8 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
      * Reads the actual node a run's pod was scheduled onto. Queries live
      * Pods (rather than Argo's own node status, whose node-placement field
      * isn't consistently present across Argo versions) filtered to this
-     * action's `action_run_uuid` pod label - set on every tier's pod via
-     * the Workflow's `podMetadata.labels`, see WorkflowDispatchService.
-     * Earlier tier attempts that were evicted by Kueue no longer exist by
-     * the time a later attempt is Running, so this should resolve to
-     * exactly the attempt that succeeded.
+     * action's `action_run_uuid` pod label, set on the Workflow's
+     * `podMetadata.labels` by WorkflowDispatchService.
      */
     private async resolveScheduledNodeName(
         actionUuid: string,
@@ -352,56 +353,13 @@ export class WorkflowWatchService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * Recovers the submission-time node ranking from the Workflow spec
-     * itself: every per-tier template carries the identical weighted
-     * `preferredDuringSchedulingIgnoredDuringExecution` list (see
-     * WorkflowDispatchService.computeLocalityTiers), so the first template
-     * that has one gives the full ranked node order.
-     */
-    private extractPreferredNodeOrder(workflow: WorkflowObject): string[] {
-        for (const template of workflow.spec?.templates ?? []) {
-            if (!template.podSpecPatch) continue;
-            try {
-                const patch = JSON.parse(template.podSpecPatch) as {
-                    affinity?: {
-                        nodeAffinity?: {
-                            preferredDuringSchedulingIgnoredDuringExecution?: {
-                                preference?: {
-                                    matchExpressions?: { values?: string[] }[];
-                                };
-                            }[];
-                        };
-                    };
-                };
-                const terms =
-                    patch.affinity?.nodeAffinity
-                        ?.preferredDuringSchedulingIgnoredDuringExecution;
-                if (terms && terms.length > 0) {
-                    return terms
-                        .map(
-                            (term) =>
-                                term.preference?.matchExpressions?.[0]
-                                    ?.values?.[0],
-                        )
-                        .filter((name): name is string => Boolean(name));
-                }
-            } catch (error) {
-                this.logger.debug(
-                    `Failed to parse podSpecPatch while recovering node preference order: ${String(error)}`,
-                );
-            }
-        }
-        return [];
-    }
-
     private rankLabelForNode(
-        preferredOrder: string[],
+        homeNode: string | undefined,
         nodeName: string | undefined,
     ): string {
         if (!nodeName) return 'unknown';
-        const index = preferredOrder.indexOf(nodeName);
-        return index === -1 ? 'other' : (index + 1).toString();
+        if (!homeNode) return 'other';
+        return homeNode === nodeName ? '1' : 'other';
     }
 
     /**
